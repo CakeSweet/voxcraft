@@ -1,0 +1,5 @@
+{
+  "name": "VoxCraft Studio",
+  "description": "Modulador de Voz em Tempo Real (Estilo Audacity) para Discord e Jogos — Web Audio DSP Studio",
+  "requestFramePermissions": ["microphone"]
+}
