@@ -15,9 +15,119 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 import urllib.request
 import zipfile
+
+GITHUB_REPO = "CakeSweet/voxcraft_studio"
+APP_VERSION = "2.1.0"
+
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+BASE_DIR = os.path.dirname(os.path.abspath(sys.executable if IS_FROZEN else __file__))
+ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", BASE_DIR), "assets")
+ICON_ICO_PATH = os.path.join(ASSETS_DIR, "voxcraft.ico")
+ICON_PNG_PATH = os.path.join(ASSETS_DIR, "voxcraft.png")
+
+
+def _enable_windows_taskbar_icon_id():
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("CakeSweet.VoxCraftStudio.1")
+        except Exception:
+            pass
+
+
+class _EarlySplash:
+    """Tela de carregamento instantânea exibida antes dos imports pesados (NumPy/SciPy/CTk)."""
+
+    def __init__(self):
+        self.root = None
+        self._bar = None
+        self._lbl = None
+        self._icon_img = None
+        try:
+            _enable_windows_taskbar_icon_id()
+            r = tk.Tk()
+            r.overrideredirect(True)
+            r.configure(bg="#0b1120")
+            r.attributes("-topmost", True)
+            w, h = 420, 185
+            sw = r.winfo_screenwidth()
+            sh = r.winfo_screenheight()
+            r.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+
+            frame = tk.Frame(r, bg="#0f172a", highlightbackground="#1e293b", highlightthickness=2)
+            frame.pack(fill="both", expand=True)
+
+            hdr = tk.Frame(frame, bg="#0f172a")
+            hdr.pack(pady=(22, 6))
+            if os.path.exists(ICON_PNG_PATH):
+                try:
+                    raw_ico = tk.PhotoImage(file=ICON_PNG_PATH)
+                    factor = max(1, raw_ico.width() // 44)
+                    self._icon_img = raw_ico.subsample(factor, factor)
+                    tk.Label(hdr, image=self._icon_img, bg="#0f172a").pack(side="left", padx=(0, 10))
+                except Exception:
+                    pass
+
+            titles = tk.Frame(hdr, bg="#0f172a")
+            titles.pack(side="left")
+            tk.Label(
+                titles, text="VoxCraft Studio", font=("Segoe UI", 18, "bold"), fg="#4cc9f0", bg="#0f172a"
+            ).pack(anchor="w")
+            tk.Label(
+                titles,
+                text=f"Modulador de Voz em Tempo Real • v{APP_VERSION}",
+                font=("Segoe UI", 9.5),
+                fg="#94a3b8",
+                bg="#0f172a",
+            ).pack(anchor="w")
+
+            self._lbl = tk.Label(
+                frame,
+                text="Inicializando...",
+                font=("Segoe UI", 10),
+                fg="#cbd5e1",
+                bg="#0f172a",
+            )
+            self._lbl.pack(pady=(12, 8))
+
+            bar_bg = tk.Canvas(frame, width=340, height=8, bg="#1e293b", highlightthickness=0)
+            bar_bg.pack()
+            self._bar = bar_bg
+            self._fill = bar_bg.create_rectangle(0, 0, 40, 8, fill="#38bdf8", width=0)
+            self.root = r
+            r.update()
+        except Exception:
+            self.root = None
+
+    def set_progress(self, frac: float, text: str):
+        if self.root is None:
+            return
+        try:
+            self._lbl.configure(text=text)
+            px = max(12, min(340, int(340 * frac)))
+            self._bar.coords(self._fill, 0, 0, px, 8)
+            self.root.update()
+        except Exception:
+            pass
+
+    def close(self):
+        if self.root is not None:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+            self.root = None
+
+
+_early_splash = _EarlySplash() if __name__ == "__main__" else None
+if _early_splash is not None:
+    _early_splash.set_progress(0.18, "Carregando motor de áudio (NumPy / SciPy)...")
+
 import customtkinter as ctk
 import numpy as np
 from scipy import signal
+
+if _early_splash is not None:
+    _early_splash.set_progress(0.38, "Carregando interface e periféricos...")
 
 try:
     from PIL import Image, ImageDraw, ImageTk
@@ -46,25 +156,13 @@ from presets import (
 )
 from audio_router import AudioDeviceItem, AudioRouter
 
-GITHUB_REPO = "CakeSweet/voxcraft_studio"
-APP_VERSION = "2.1.0"
+if _early_splash is not None:
+    _early_splash.set_progress(0.54, "Preparando janela principal...")
+    _early_splash.close()
+    _early_splash = None
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
-
-IS_FROZEN = bool(getattr(sys, "frozen", False))
-BASE_DIR = os.path.dirname(os.path.abspath(sys.executable if IS_FROZEN else __file__))
-ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", BASE_DIR), "assets")
-ICON_ICO_PATH = os.path.join(ASSETS_DIR, "voxcraft.ico")
-ICON_PNG_PATH = os.path.join(ASSETS_DIR, "voxcraft.png")
-
-
-def _enable_windows_taskbar_icon_id():
-    if sys.platform == "win32":
-        try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("CakeSweet.VoxCraftStudio.1")
-        except Exception:
-            pass
 
 
 def _load_or_create_pil_icon():
@@ -90,6 +188,7 @@ class VoxCraftApp(ctk.CTk):
     def __init__(self):
         _enable_windows_taskbar_icon_id()
         super().__init__()
+        self.withdraw()
         self.title("VoxCraft Studio — Modulador de Voz em Tempo Real (Estilo Audacity)")
         self.geometry("1220x780")
         self.minsize(1060, 680)
@@ -98,6 +197,18 @@ class VoxCraftApp(ctk.CTk):
         self._tray_icon = None
         self._tray_thread = None
         self._is_quitting = False
+
+        # Cache de estado da UI para evitar redesenhos desnecessários e travamentos ao restaurar/maximizar
+        self._last_in_norm = -1.0
+        self._last_out_norm = -1.0
+        self._last_gate_open: bool | None = None
+        self._last_wave_idle = False
+        self._last_ui_hidden = False
+        self._eq_redraw_job = None
+        self._last_eq_sig = None
+
+        splash_win, splash_lbl, splash_bar = self._create_loading_overlay()
+        self._update_loading_overlay(splash_win, splash_lbl, splash_bar, 0.62, "Montando controles e abas de efeitos...")
 
         self._apply_window_icon()
 
@@ -128,19 +239,21 @@ class VoxCraftApp(ctk.CTk):
         self._hotkey_hold_cached: bool = False
 
         self._build_layout()
+        self._update_loading_overlay(splash_win, splash_lbl, splash_bar, 0.80, "Carregando dispositivos de áudio...")
         self._restore_saved_ui_prefs()
         self._refresh_devices(reinit_backend=False, initial_load=True)
 
+        self._update_loading_overlay(splash_win, splash_lbl, splash_bar, 0.94, "Aplicando voz e preferências...")
         saved_preset = self.app_config.get("last_preset", "Normal (Limpo + Gate)")
         if saved_preset in self.builtin_presets:
             self.preset_var.set(saved_preset)
-            self._apply_preset(saved_preset, save_cfg=False)
+            self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True)
         elif saved_preset in self.user_presets:
             self.preset_var.set(f"★ {saved_preset}")
-            self._apply_preset(saved_preset, save_cfg=False)
+            self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True)
         else:
             self.preset_var.set("Normal (Limpo + Gate)")
-            self._apply_preset("Normal (Limpo + Gate)", save_cfg=False)
+            self._apply_preset("Normal (Limpo + Gate)", save_cfg=False, preserve_bypass=True)
 
         if self.app_config.pop("pending_update_restore", False):
             raw_params = self.app_config.pop("current_params", None)
@@ -149,7 +262,7 @@ class VoxCraftApp(ctk.CTk):
                 valid_fields = set(asdict(DSPParams()).keys())
                 filtered = {k: v for k, v in raw_params.items() if k in valid_fields}
                 try:
-                    self._load_params_to_ui(DSPParams(**filtered))
+                    self._load_params_to_ui(DSPParams(**filtered), preserve_bypass=False)
                 except Exception:
                     pass
             self._save_config()
@@ -162,10 +275,75 @@ class VoxCraftApp(ctk.CTk):
 
         self._start_tray_icon()
         self._start_hotkey_listener()
-        self._schedule_ui_loop()
-        self.after(250, self._apply_window_icon)
-
+        self.bind("<Map>", self._on_window_map)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self.update_idletasks()
+        if splash_win is not None:
+            try:
+                splash_win.destroy()
+            except Exception:
+                pass
+        self.deiconify()
+        self.lift()
+        self.after(150, self._apply_window_icon)
+        self._schedule_ui_loop()
+
+    def _create_loading_overlay(self):
+        try:
+            sw_win = ctk.CTkToplevel(self)
+            sw_win.overrideredirect(True)
+            sw_win.configure(fg_color="#0f172a")
+            sw_win.attributes("-topmost", True)
+            w, h = 420, 185
+            scr_w = sw_win.winfo_screenwidth()
+            scr_h = sw_win.winfo_screenheight()
+            sw_win.geometry(f"{w}x{h}+{(scr_w - w) // 2}+{(scr_h - h) // 2}")
+
+            box = ctk.CTkFrame(sw_win, fg_color="#0f172a", border_width=2, border_color="#1e293b", corner_radius=8)
+            box.pack(fill="both", expand=True)
+
+            ctk.CTkLabel(
+                box, text="VoxCraft Studio", font=ctk.CTkFont(size=20, weight="bold"), text_color="#4cc9f0"
+            ).pack(pady=(26, 2))
+            ctk.CTkLabel(
+                box,
+                text=f"Modulador de Voz em Tempo Real • v{APP_VERSION}",
+                font=ctk.CTkFont(size=11.5),
+                text_color="#94a3b8",
+            ).pack()
+
+            lbl = ctk.CTkLabel(
+                box, text="Preparando interface...", font=ctk.CTkFont(size=12), text_color="#cbd5e1"
+            )
+            lbl.pack(pady=(16, 10))
+
+            bar = ctk.CTkProgressBar(box, width=340, height=8, progress_color="#38bdf8", fg_color="#1e293b")
+            bar.set(0.58)
+            bar.pack()
+            sw_win.update()
+            return sw_win, lbl, bar
+        except Exception:
+            return None, None, None
+
+    @staticmethod
+    def _update_loading_overlay(sw_win, lbl, bar, frac: float, text: str):
+        if sw_win is None:
+            return
+        try:
+            lbl.configure(text=text)
+            bar.set(frac)
+            sw_win.update()
+        except Exception:
+            pass
+
+    def _on_window_map(self, _event=None):
+        self._last_ui_hidden = False
+        self._last_in_norm = -1.0
+        self._last_out_norm = -1.0
+        self._last_gate_open = None
+        self._last_wave_idle = False
+        self._schedule_eq_redraw()
 
     def _apply_window_icon(self):
         if sys.platform == "win32" and os.path.exists(ICON_ICO_PATH):
@@ -230,6 +408,8 @@ class VoxCraftApp(ctk.CTk):
         self.state("normal")
         self.lift()
         self.focus_force()
+        self._on_window_map()
+        self.update_idletasks()
 
     def _minimize_to_tray(self):
         self.withdraw()
@@ -686,7 +866,7 @@ class VoxCraftApp(ctk.CTk):
         # Gráfico da curva de resposta de frequência
         self.eq_canvas = tk.Canvas(top, height=195, bg="#090d16", highlightthickness=1, highlightbackground="#1e293b")
         self.eq_canvas.pack(fill="x", padx=14, pady=(4, 12))
-        self.eq_canvas.bind("<Configure>", lambda _e: self._draw_eq_curve())
+        self.eq_canvas.bind("<Configure>", lambda _e: self._schedule_eq_redraw())
 
         # Controles de Corte (HPF / LPF) e 5 Bandas
         bot = ctk.CTkFrame(tab, fg_color="#0f172a", corner_radius=10)
@@ -1119,12 +1299,27 @@ class VoxCraftApp(ctk.CTk):
         self.params = p
         self.dsp.update_params(p)
         self._update_hotkey_hint()
-        self._draw_eq_curve()
+        eq_sig = (
+            p.eq_enabled,
+            p.eq_hpf_enabled,
+            round(p.eq_hpf_hz, 1),
+            p.eq_lpf_enabled,
+            round(p.eq_lpf_hz, 1),
+            round(p.eq_band1_db, 2),
+            round(p.eq_band2_db, 2),
+            round(p.eq_band3_db, 2),
+            round(p.eq_band4_db, 2),
+            round(p.eq_band5_db, 2),
+        )
+        if eq_sig != self._last_eq_sig:
+            self._last_eq_sig = eq_sig
+            self._draw_eq_curve()
 
-    def _load_params_to_ui(self, p: DSPParams):
+    def _load_params_to_ui(self, p: DSPParams, preserve_bypass: bool = False):
         self._syncing_ui = True
         try:
-            self.bypass_var.set(p.bypass)
+            if not preserve_bypass:
+                self.bypass_var.set(p.bypass)
             self.input_gain_var.set(p.input_gain_db)
             self.output_gain_var.set(p.output_gain_db)
             self.gate_en_var.set(p.gate_enabled)
@@ -1265,13 +1460,13 @@ class VoxCraftApp(ctk.CTk):
         clean = choice[2:] if choice.startswith("★ ") else choice
         self._apply_preset(clean)
 
-    def _apply_preset(self, name: str, save_cfg: bool = True):
+    def _apply_preset(self, name: str, save_cfg: bool = True, preserve_bypass: bool = True):
         if name in self.builtin_presets:
-            self._load_params_to_ui(self.builtin_presets[name].copy())
+            self._load_params_to_ui(self.builtin_presets[name].copy(), preserve_bypass=preserve_bypass)
             if save_cfg:
                 self._save_config()
         elif name in self.user_presets:
-            self._load_params_to_ui(self.user_presets[name].copy())
+            self._load_params_to_ui(self.user_presets[name].copy(), preserve_bypass=preserve_bypass)
             if save_cfg:
                 self._save_config()
 
@@ -1304,6 +1499,8 @@ class VoxCraftApp(ctk.CTk):
     # ------------------------------------------------------------------ #
     def _restore_saved_ui_prefs(self):
         cfg = self.app_config or {}
+        if "bypass_enabled" in cfg:
+            self.bypass_var.set(bool(cfg["bypass_enabled"]))
         if "monitor_enabled" in cfg:
             self.monitor_var.set(bool(cfg["monitor_enabled"]))
         saved_lat = cfg.get("latency")
@@ -1343,6 +1540,7 @@ class VoxCraftApp(ctk.CTk):
         preset_choice = self.preset_var.get()
         clean_preset = preset_choice[2:] if preset_choice.startswith("★ ") else preset_choice
         self.app_config["last_preset"] = clean_preset
+        self.app_config["bypass_enabled"] = bool(self.bypass_var.get())
         self.app_config["monitor_enabled"] = bool(self.monitor_var.get())
         self.app_config["latency"] = str(self.latency_var.get())
         self.app_config["minimize_to_tray"] = bool(self.minimize_to_tray_var.get())
@@ -1510,7 +1708,21 @@ class VoxCraftApp(ctk.CTk):
     # ------------------------------------------------------------------ #
     # Gráficos em Tempo Real (Curva EQ & Osciloscópio)
     # ------------------------------------------------------------------ #
+    def _schedule_eq_redraw(self):
+        if self._eq_redraw_job is not None:
+            try:
+                self.after_cancel(self._eq_redraw_job)
+            except Exception:
+                pass
+        self._eq_redraw_job = self.after(45, self._draw_eq_curve)
+
     def _draw_eq_curve(self):
+        self._eq_redraw_job = None
+        try:
+            if self.state() == "iconic":
+                return
+        except Exception:
+            pass
         c = self.eq_canvas
         w = max(400, c.winfo_width())
         h = max(160, c.winfo_height())
@@ -1561,27 +1773,48 @@ class VoxCraftApp(ctk.CTk):
     def _schedule_ui_loop(self):
         if self._is_quitting:
             return
-        # Atualiza VU meters e forma de onda ~30 FPS
+        # Pausa redesenhos quando minimizado ou oculto na bandeja (evita travamento ao restaurar/maximizar)
+        try:
+            is_hidden = (self.state() == "iconic") or (not self.winfo_viewable())
+        except Exception:
+            is_hidden = False
+
+        if is_hidden:
+            self._last_ui_hidden = True
+            self.after(220, self._schedule_ui_loop)
+            return
+
+        force_refresh = self._last_ui_hidden
+        self._last_ui_hidden = False
+
+        # Atualiza VU meters apenas se houve variação visível
         in_norm = max(0.0, min(1.0, (self.dsp.input_peak_db + 60.0) / 60.0))
         out_norm = max(0.0, min(1.0, (self.dsp.output_peak_db + 60.0) / 60.0))
-        self.in_bar.set(in_norm)
-        self.out_bar.set(out_norm)
+        if force_refresh or abs(in_norm - self._last_in_norm) >= 0.005:
+            self._last_in_norm = in_norm
+            self.in_bar.set(in_norm)
+        if force_refresh or abs(out_norm - self._last_out_norm) >= 0.005:
+            self._last_out_norm = out_norm
+            self.out_bar.set(out_norm)
 
-        if self.dsp.gate_is_open:
-            self.gate_led.configure(text="● Noise Gate: Aberto", text_color="#10b981")
-        else:
-            self.gate_led.configure(text="● Noise Gate: Silenciado", text_color="#f59e0b")
+        gate_open = bool(self.dsp.gate_is_open)
+        if force_refresh or gate_open != self._last_gate_open:
+            self._last_gate_open = gate_open
+            if gate_open:
+                self.gate_led.configure(text="● Noise Gate: Aberto", text_color="#10b981")
+            else:
+                self.gate_led.configure(text="● Noise Gate: Silenciado", text_color="#f59e0b")
 
-        # Desenha Osciloscópio
+        # Desenha Osciloscópio apenas quando rodando (ou 1x quando parado)
         wc = self.wave_canvas
-        ww = max(200, wc.winfo_width())
-        wh = max(50, wc.winfo_height())
-        wc.delete("all")
-        mid = wh / 2.0
-        wc.create_line(0, mid, ww, mid, fill="#1e293b")
-
         wave = self.dsp.last_waveform
         if self.router.running and len(wave) > 1:
+            self._last_wave_idle = False
+            ww = max(200, wc.winfo_width())
+            wh = max(50, wc.winfo_height())
+            wc.delete("all")
+            mid = wh / 2.0
+            wc.create_line(0, mid, ww, mid, fill="#1e293b")
             xs = np.linspace(0, ww, len(wave))
             ys = mid - np.clip(wave, -1.0, 1.0) * (mid - 4)
             pts = []
@@ -1589,6 +1822,13 @@ class VoxCraftApp(ctk.CTk):
                 pts.extend([float(xv), float(yv)])
             color = "#f59e0b" if self.params.bypass else "#4cc9f0"
             wc.create_line(*pts, fill=color, width=1.6)
+        elif force_refresh or not self._last_wave_idle:
+            self._last_wave_idle = True
+            ww = max(200, wc.winfo_width())
+            wh = max(50, wc.winfo_height())
+            wc.delete("all")
+            mid = wh / 2.0
+            wc.create_line(0, mid, ww, mid, fill="#1e293b")
 
         self.after(33, self._schedule_ui_loop)
 
