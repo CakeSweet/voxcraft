@@ -2361,7 +2361,34 @@ class VoxCraftApp(ctk.CTk):
             except Exception:
                 pass
             try:
-                subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path) or tempfile.gettempdir())
+                exe_name = os.path.basename(exe_path).lower()
+                if IS_FROZEN and sys.platform == "win32":
+                    bat_path = os.path.join(tempfile.gettempdir(), "voxcraft_auto_update.bat")
+                    app_exe = sys.executable
+                    if "setup" in exe_name:
+                        script = (
+                            "@echo off\r\n"
+                            "chcp 65001 >nul\r\n"
+                            "ping -n 3 127.0.0.1 >nul\r\n"
+                            f'"{exe_path}" /SILENT /NORESTART /CLOSEAPPLICATIONS\r\n'
+                            f'if exist "{app_exe}" start "" "{app_exe}"\r\n'
+                            'del "%~f0"\r\n'
+                        )
+                    else:
+                        script = (
+                            "@echo off\r\n"
+                            "chcp 65001 >nul\r\n"
+                            "ping -n 3 127.0.0.1 >nul\r\n"
+                            f'copy /y "{exe_path}" "{app_exe}" >nul\r\n'
+                            f'start "" "{app_exe}"\r\n'
+                            'del "%~f0"\r\n'
+                        )
+                    with open(bat_path, "w", encoding="utf-8") as bf:
+                        bf.write(script)
+                    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    subprocess.Popen(["cmd.exe", "/c", bat_path], cwd=tempfile.gettempdir(), creationflags=flags)
+                else:
+                    subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path) or tempfile.gettempdir())
             except Exception as err:
                 messagebox.showerror("Erro ao abrir instalador", f"Instalador salvo em:\n{exe_path}\n\nErro: {err}")
             self._quit_app()

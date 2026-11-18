@@ -22,6 +22,7 @@ OutputDir=Output
 OutputBaseFilename=VoxCraftStudio_Setup
 SetupIconFile=assets\voxcraft.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
+CloseApplications=yes
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
