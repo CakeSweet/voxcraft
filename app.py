@@ -1,9 +1,15 @@
 import ctypes
+from dataclasses import asdict
+import io
 import os
+import shutil
+import subprocess
 import sys
 import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog
+import urllib.request
+import zipfile
 import customtkinter as ctk
 import numpy as np
 from scipy import signal
@@ -29,6 +35,8 @@ from presets import (
     save_user_presets,
 )
 from audio_router import AudioDeviceItem, AudioRouter
+
+GITHUB_REPO = "CakeSweet/voxcraft_studio"
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -106,6 +114,24 @@ class VoxCraftApp(ctk.CTk):
         else:
             self.preset_var.set("Normal (Limpo + Gate)")
             self._apply_preset("Normal (Limpo + Gate)", save_cfg=False)
+
+        if self.app_config.pop("pending_update_restore", False):
+            raw_params = self.app_config.pop("current_params", None)
+            was_running_upd = bool(self.app_config.pop("was_running_before_update", False))
+            if isinstance(raw_params, dict):
+                valid_fields = set(asdict(DSPParams()).keys())
+                filtered = {k: v for k, v in raw_params.items() if k in valid_fields}
+                try:
+                    self._load_params_to_ui(DSPParams(**filtered))
+                except Exception:
+                    pass
+            self._save_config()
+            self.status_lbl.configure(
+                text="Aplicação atualizada! Entradas, saídas e ajustes restaurados.",
+                text_color="#10b981",
+            )
+            if was_running_upd:
+                self.after(450, self._start_audio)
 
         self._start_tray_icon()
         self._schedule_ui_loop()
@@ -198,20 +224,20 @@ class VoxCraftApp(ctk.CTk):
         topbar.pack_propagate(False)
 
         title_box = ctk.CTkFrame(topbar, fg_color="transparent")
-        title_box.pack(side="left", padx=14)
+        title_box.pack(side="left", padx=(12, 8))
         ctk.CTkLabel(
             title_box, text="VoxCraft Studio", font=ctk.CTkFont(size=20, weight="bold"), text_color="#4cc9f0"
         ).pack(anchor="w")
         ctk.CTkLabel(
             title_box,
-            text="Efeitos estilo Audacity em tempo real para Discord & Jogos",
+            text="Modulador estilo Audacity em tempo real",
             font=ctk.CTkFont(size=11),
             text_color="#94a3b8",
         ).pack(anchor="w")
 
         # Controles de Preset no Topo
         preset_box = ctk.CTkFrame(topbar, fg_color="transparent")
-        preset_box.pack(side="left", padx=12)
+        preset_box.pack(side="left", padx=8)
         ctk.CTkLabel(preset_box, text="Voz / Preset:", font=ctk.CTkFont(size=12, weight="bold")).pack(
             side="left", padx=(0, 6)
         )
@@ -220,42 +246,52 @@ class VoxCraftApp(ctk.CTk):
             preset_box,
             variable=self.preset_var,
             values=self._all_preset_names(),
-            width=215,
+            width=195,
             command=self._on_preset_selected,
         )
-        self.preset_menu.pack(side="left", padx=4)
+        self.preset_menu.pack(side="left", padx=3)
 
         ctk.CTkButton(
-            preset_box, text="Salvar Voz", width=90, fg_color="#2563eb", command=self._save_custom_preset
-        ).pack(side="left", padx=4)
+            preset_box, text="Salvar Voz", width=82, fg_color="#2563eb", command=self._save_custom_preset
+        ).pack(side="left", padx=3)
         ctk.CTkButton(
-            preset_box, text="Excluir", width=65, fg_color="#475569", hover_color="#dc2626",
+            preset_box, text="Excluir", width=58, fg_color="#475569", hover_color="#dc2626",
             command=self._delete_custom_preset
-        ).pack(side="left", padx=4)
+        ).pack(side="left", padx=3)
 
-        # Botões da Direita (Guia, Bypass, Ligar)
+        # Botões da Direita (Atualizar App, Guia, Bypass, Ligar)
         right_top = ctk.CTkFrame(topbar, fg_color="transparent")
-        right_top.pack(side="right", padx=10)
+        right_top.pack(side="right", padx=8)
+
+        self.update_btn = ctk.CTkButton(
+            right_top,
+            text="Atualizar App",
+            width=106,
+            fg_color="#2563eb",
+            hover_color="#1d4ed8",
+            command=self._start_app_update,
+        )
+        self.update_btn.pack(side="left", padx=4)
 
         ctk.CTkButton(
-            right_top, text="Guia Discord / Jogos", width=140, fg_color="#334155",
+            right_top, text="Guia Discord", width=102, fg_color="#334155",
             hover_color="#475569", command=self._open_discord_guide
-        ).pack(side="left", padx=5)
+        ).pack(side="left", padx=4)
 
         self.bypass_var = ctk.BooleanVar(value=False)
         self.bypass_btn = ctk.CTkSwitch(
             right_top,
-            text="Voz Original (Bypass)",
+            text="Voz Original",
             variable=self.bypass_var,
             progress_color="#f59e0b",
             command=self._on_param_change,
         )
-        self.bypass_btn.pack(side="left", padx=8)
+        self.bypass_btn.pack(side="left", padx=6)
 
         self.power_btn = ctk.CTkButton(
             right_top,
             text="INICIAR ÁUDIO",
-            width=155,
+            width=145,
             height=38,
             font=ctk.CTkFont(size=13, weight="bold"),
             fg_color="#10b981",
@@ -275,21 +311,9 @@ class VoxCraftApp(ctk.CTk):
         side = ctk.CTkScrollableFrame(parent, width=320, corner_radius=10, fg_color="#161b24")
         side.pack(side="left", fill="y", padx=(0, 8))
 
-        routing_hdr = ctk.CTkFrame(side, fg_color="transparent")
-        routing_hdr.pack(fill="x", padx=10, pady=(6, 4))
         ctk.CTkLabel(
-            routing_hdr, text="Roteamento de Áudio", font=ctk.CTkFont(size=15, weight="bold"), text_color="#e2e8f0"
-        ).pack(side="left")
-        ctk.CTkButton(
-            routing_hdr,
-            text="↻ Atualizar",
-            width=86,
-            height=26,
-            fg_color="#2563eb",
-            hover_color="#1d4ed8",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=lambda: self._refresh_devices(reinit_backend=True),
-        ).pack(side="right")
+            side, text="Roteamento de Áudio", font=ctk.CTkFont(size=15, weight="bold"), text_color="#e2e8f0"
+        ).pack(anchor="w", padx=10, pady=(6, 4))
 
         # Entrada
         ctk.CTkLabel(side, text="Microfone (Entrada):", font=ctk.CTkFont(size=12)).pack(anchor="w", padx=10)
@@ -344,11 +368,9 @@ class VoxCraftApp(ctk.CTk):
 
         ctk.CTkButton(
             side,
-            text="↻ Atualizar Entradas e Saídas",
-            height=30,
-            fg_color="#1d4ed8",
-            hover_color="#1e40af",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            text="Atualizar Dispositivos",
+            height=28,
+            fg_color="#334155",
             command=lambda: self._refresh_devices(reinit_backend=True),
         ).pack(fill="x", padx=10, pady=(2, 6))
 
@@ -1219,7 +1241,7 @@ class VoxCraftApp(ctk.CTk):
             return None
         return {"label": item.label, "name": item.name, "hostapi": item.hostapi}
 
-    def _save_config(self):
+    def _save_config(self, include_params: bool = False):
         in_item = self._selected_device_item(self.in_dev_var.get(), self.in_devices)
         out_item = self._selected_device_item(self.out_dev_var.get(), self.out_devices)
         mon_item = self._selected_device_item(self.mon_dev_var.get(), self.out_devices)
@@ -1238,6 +1260,8 @@ class VoxCraftApp(ctk.CTk):
         self.app_config["monitor_enabled"] = bool(self.monitor_var.get())
         self.app_config["latency"] = str(self.latency_var.get())
         self.app_config["minimize_to_tray"] = bool(self.minimize_to_tray_var.get())
+        if include_params:
+            self.app_config["current_params"] = asdict(self.params)
         save_app_config(self.app_config)
 
     def _on_device_changed(self, *_):
@@ -1478,6 +1502,206 @@ class VoxCraftApp(ctk.CTk):
             wc.create_line(*pts, fill=color, width=1.6)
 
         self.after(33, self._schedule_ui_loop)
+
+    # ------------------------------------------------------------------ #
+    # Atualização do Aplicativo (Git / GitHub) + Preservar Configurações
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _run_cmd(args: list[str], cwd: str) -> tuple[int, str]:
+        kwargs = {"cwd": cwd, "stdout": subprocess.PIPE, "stderr": subprocess.STDOUT, "text": True}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            res = subprocess.run(args, timeout=45, **kwargs)
+            return res.returncode, (res.stdout or "").strip()
+        except Exception as e:
+            return 1, str(e)
+
+    def _start_app_update(self):
+        # Salva imediatamente entradas, saídas, preset e parâmetros atuais antes de checar/atualizar
+        self._save_config(include_params=True)
+
+        win = ctk.CTkToplevel(self)
+        win.title("Atualizar VoxCraft Studio")
+        win.geometry("490x260")
+        win.resizable(False, False)
+        win.grab_set()
+
+        ctk.CTkLabel(
+            win, text="Atualização do VoxCraft Studio", font=ctk.CTkFont(size=17, weight="bold"), text_color="#4cc9f0"
+        ).pack(anchor="w", padx=20, pady=(16, 6))
+
+        msg_lbl = ctk.CTkLabel(
+            win,
+            text="Verificando atualizações e garantindo que suas entradas e saídas estejam salvas...",
+            justify="left",
+            wraplength=450,
+            font=ctk.CTkFont(size=12.5),
+        )
+        msg_lbl.pack(anchor="w", padx=20, pady=8)
+
+        progress = ctk.CTkProgressBar(win, mode="indeterminate", width=440)
+        progress.pack(padx=20, pady=(6, 12))
+        progress.start()
+
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(fill="x", padx=20, pady=(6, 14))
+
+        action_btn = ctk.CTkButton(btn_row, text="Aplicar Atualização", width=165, fg_color="#10b981", state="disabled")
+        action_btn.pack(side="left")
+        close_btn = ctk.CTkButton(btn_row, text="Fechar", width=100, fg_color="#334155", command=win.destroy)
+        close_btn.pack(side="right")
+
+        def safe_ui(fn):
+            if win.winfo_exists():
+                self.after(0, fn)
+
+        def finish_with_message(text: str, color: str = "#e2e8f0"):
+            def _ui():
+                progress.stop()
+                progress.set(1.0)
+                msg_lbl.configure(text=text, text_color=color)
+                action_btn.configure(state="disabled")
+            safe_ui(_ui)
+
+        def apply_git_update(target_ref: str):
+            def _worker():
+                safe_ui(lambda: (
+                    action_btn.configure(state="disabled"),
+                    close_btn.configure(state="disabled"),
+                    progress.start(),
+                    msg_lbl.configure(text="Baixando novos arquivos via Git...", text_color="#38bdf8"),
+                ))
+                rc, out = self._run_cmd(["git", "pull", "--ff-only"], BASE_DIR)
+                if rc != 0:
+                    remote_branch = target_ref.split("/", 1)[-1] if "/" in target_ref else "main"
+                    rc, out = self._run_cmd(["git", "pull", "--autostash", "origin", remote_branch], BASE_DIR)
+                if rc != 0:
+                    safe_ui(lambda: (
+                        progress.stop(),
+                        close_btn.configure(state="normal"),
+                        msg_lbl.configure(text=f"Falha ao atualizar via Git:\n{out[:280]}", text_color="#ef4444"),
+                    ))
+                    return
+
+                safe_ui(lambda: msg_lbl.configure(text="Atualizando dependências Python (requirements.txt)..."))
+                self._run_cmd([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"], BASE_DIR)
+                safe_ui(self._relaunch_after_update)
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        def apply_zip_update():
+            def _worker():
+                safe_ui(lambda: (
+                    action_btn.configure(state="disabled"),
+                    close_btn.configure(state="disabled"),
+                    progress.start(),
+                    msg_lbl.configure(text="Baixando pacote mais recente do GitHub...", text_color="#38bdf8"),
+                ))
+                raw_zip = None
+                last_err = ""
+                for branch in ("main", "master"):
+                    url = f"https://github.com/{GITHUB_REPO}/archive/refs/heads/{branch}.zip"
+                    try:
+                        with urllib.request.urlopen(url, timeout=25) as resp:
+                            raw_zip = resp.read()
+                        break
+                    except Exception as e:
+                        last_err = str(e)
+                if not raw_zip:
+                    safe_ui(lambda: (
+                        progress.stop(),
+                        close_btn.configure(state="normal"),
+                        msg_lbl.configure(text=f"Não foi possível baixar atualização:\n{last_err}", text_color="#ef4444"),
+                    ))
+                    return
+
+                try:
+                    preserved = {"voxcraft_config.json", "user_presets.json"}
+                    with zipfile.ZipFile(io.BytesIO(raw_zip)) as zf:
+                        for member in zf.infolist():
+                            if member.is_dir():
+                                continue
+                            parts = member.filename.split("/", 1)
+                            rel = parts[1] if len(parts) > 1 else parts[0]
+                            if not rel or rel in preserved or rel.startswith("."):
+                                if rel != ".gitignore":
+                                    continue
+                            dest = os.path.normpath(os.path.join(BASE_DIR, rel))
+                            if not dest.startswith(os.path.normpath(BASE_DIR)):
+                                continue
+                            os.makedirs(os.path.dirname(dest), exist_ok=True)
+                            with zf.open(member) as src, open(dest, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+                except Exception as e:
+                    safe_ui(lambda: (
+                        progress.stop(),
+                        close_btn.configure(state="normal"),
+                        msg_lbl.configure(text=f"Erro ao extrair arquivos:\n{e}", text_color="#ef4444"),
+                    ))
+                    return
+
+                safe_ui(lambda: msg_lbl.configure(text="Atualizando dependências Python (requirements.txt)..."))
+                self._run_cmd([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"], BASE_DIR)
+                safe_ui(self._relaunch_after_update)
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        def check_worker():
+            git_dir = os.path.join(BASE_DIR, ".git")
+            if os.path.isdir(git_dir):
+                rc, out = self._run_cmd(["git", "fetch", "origin"], BASE_DIR)
+                if rc != 0:
+                    finish_with_message(f"Não foi possível verificar o GitHub:\n{out[:260]}", "#f59e0b")
+                    return
+                rc_u, upstream = self._run_cmd(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], BASE_DIR)
+                target = upstream if rc_u == 0 and upstream else "origin/main"
+                rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
+                if rc_r != 0:
+                    target = "origin/master"
+                    rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
+                rc_h, local_sha = self._run_cmd(["git", "rev-parse", "HEAD"], BASE_DIR)
+                if rc_h == 0 and rc_r == 0 and local_sha == remote_sha:
+                    finish_with_message(
+                        "Você já está na versão mais recente do VoxCraft Studio!\n"
+                        "Suas entradas e saídas de áudio continuam salvas.",
+                        "#10b981",
+                    )
+                    return
+
+                _, log_out = self._run_cmd(["git", "log", f"HEAD..{target}", "--oneline", "-n", "4"], BASE_DIR)
+                summary = f"Nova atualização disponível!\n\n{log_out}" if log_out else "Nova atualização disponível no repositório."
+                safe_ui(lambda: (
+                    progress.stop(),
+                    msg_lbl.configure(
+                        text=f"{summary}\n\nSuas entradas, saídas e presets serão mantidos.",
+                        text_color="#e2e8f0",
+                    ),
+                    action_btn.configure(state="normal", command=lambda: apply_git_update(target)),
+                ))
+            else:
+                safe_ui(lambda: (
+                    progress.stop(),
+                    msg_lbl.configure(
+                        text="Pasta sem repositório Git detectada.\n"
+                             "Você pode baixar e aplicar a versão mais recente do GitHub agora.\n"
+                             "Suas entradas, saídas e presets salvos não serão apagados.",
+                        text_color="#e2e8f0",
+                    ),
+                    action_btn.configure(state="normal", text="Baixar e Atualizar", command=apply_zip_update),
+                ))
+
+        threading.Thread(target=check_worker, daemon=True).start()
+
+    def _relaunch_after_update(self):
+        self.app_config["pending_update_restore"] = True
+        self.app_config["was_running_before_update"] = bool(self.router.running)
+        self._save_config(include_params=True)
+        try:
+            subprocess.Popen([sys.executable, os.path.abspath(__file__)], cwd=BASE_DIR)
+        except Exception as e:
+            messagebox.showerror("Atualização Concluída", f"Arquivos atualizados! Reabra o aplicativo manualmente.\n({e})")
+        self._quit_app()
 
     # ------------------------------------------------------------------ #
     # Guia Discord & Fechamento / Bandeja
