@@ -1,12 +1,14 @@
 import ctypes
 from dataclasses import asdict
 import io
+import json
 import os
 import re
 import shutil
 import ssl
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -45,6 +47,7 @@ from presets import (
 from audio_router import AudioDeviceItem, AudioRouter
 
 GITHUB_REPO = "CakeSweet/voxcraft_studio"
+APP_VERSION = "2.1.0"
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -1824,17 +1827,81 @@ class VoxCraftApp(ctk.CTk):
 
             threading.Thread(target=_worker, daemon=True).start()
 
+        def apply_exe_release_update(download_url: str, asset_name: str):
+            def _worker():
+                safe_ui(lambda: (
+                    action_btn.configure(state="disabled"),
+                    zip_local_btn.configure(state="disabled"),
+                    close_btn.configure(state="disabled"),
+                    progress.start(),
+                    msg_lbl.configure(text=f"Baixando {asset_name} do GitHub Releases...", text_color="#38bdf8"),
+                ))
+                try:
+                    raw_exe = self._download_bytes(download_url, timeout=90)
+                    out_path = os.path.join(tempfile.gettempdir(), asset_name)
+                    with open(out_path, "wb") as f:
+                        f.write(raw_exe)
+                except Exception as e:
+                    finish_message(f"Falha ao baixar instalador (.exe):\n{e}", "#ef4444")
+                    return
+
+                def _launch_installer():
+                    self.app_config["pending_update_restore"] = True
+                    self.app_config["was_running_before_update"] = bool(self.router.running)
+                    self._save_config(include_params=True)
+                    try:
+                        win.grab_release()
+                        win.destroy()
+                    except Exception:
+                        pass
+                    try:
+                        subprocess.Popen([out_path], cwd=tempfile.gettempdir())
+                    except Exception as err:
+                        messagebox.showerror("Erro ao abrir instalador", f"Instalador salvo em:\n{out_path}\n\nErro: {err}")
+                    self._quit_app()
+
+                safe_ui(_launch_installer)
+
+            threading.Thread(target=_worker, daemon=True).start()
+
         def check_worker():
+            repo_slug = self._detect_github_repo()
             if IS_FROZEN:
-                finish_message(
-                    "Você está executando o VoxCraft Studio instalado (.exe).\n"
-                    "Para atualizar o executável, baixe o novo VoxCraftStudio_Setup.exe do GitHub Releases "
-                    "(suas configurações ficam salvas em %APPDATA%\\VoxCraftStudio).",
-                    "#e2e8f0",
-                )
+                api_url = f"https://api.github.com/repos/{repo_slug}/releases/latest"
+                try:
+                    raw = self._download_bytes(api_url, timeout=15)
+                    rel = json.loads(raw.decode("utf-8"))
+                    assets = rel.get("assets") or []
+                    chosen = next((a for a in assets if a.get("name") == "VoxCraftStudio_Setup.exe"), None)
+                    if chosen is None:
+                        chosen = next((a for a in assets if str(a.get("name", "")).lower().endswith(".exe")), None)
+                    if chosen and chosen.get("browser_download_url"):
+                        tag = rel.get("tag_name") or rel.get("name") or "latest"
+                        asset_name = chosen["name"]
+                        dl_url = chosen["browser_download_url"]
+                        finish_message(
+                            f"Release encontrada no GitHub ({tag}): {asset_name}\n"
+                            "Clique abaixo para baixar e executar o instalador automaticamente.\n"
+                            "Suas entradas, saídas e presets ficam salvos em %APPDATA%\\VoxCraftStudio.",
+                            "#10b981",
+                            enable_action=True,
+                            btn_text="Baixar e Instalar (.exe)",
+                            cmd=lambda: apply_exe_release_update(dl_url, asset_name),
+                        )
+                        return
+                    finish_message(
+                        f"Nenhum arquivo .exe encontrado nas Releases de github.com/{repo_slug}.\n"
+                        "Verifique se o workflow 'Build & Publish Windows Installer (.exe)' já foi executado no GitHub.",
+                        "#f59e0b",
+                    )
+                except Exception as e:
+                    finish_message(
+                        f"Não foi possível consultar Releases de github.com/{repo_slug}:\n{e}\n\n"
+                        "Suas configurações ficam salvas em %APPDATA%\\VoxCraftStudio.",
+                        "#ef4444",
+                    )
                 return
 
-            repo_slug = self._detect_github_repo()
             git_dir = os.path.join(BASE_DIR, ".git")
             has_git = os.path.isdir(git_dir) and (shutil.which("git") is not None)
 

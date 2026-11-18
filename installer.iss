@@ -2,7 +2,9 @@
 ; Execute build_installer.bat ou abra este arquivo no Inno Setup Compiler.
 
 #define MyAppName "VoxCraft Studio"
-#define MyAppVersion "2.1.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "2.1.0"
+#endif
 #define MyAppPublisher "CakeSweet"
 #define MyAppExeName "VoxCraftStudio.exe"
 
