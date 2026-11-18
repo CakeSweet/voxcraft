@@ -27,6 +27,8 @@ THEMES: dict[str, dict[str, str]] = {
         "control_hover": "#334155",
         "control_border": "#334155",
         "dropdown_bg": "#111827",
+        "dropdown_hover": "#1e293b",
+        "dropdown_text": "#e2e8f0",
         "track_bg": "#243247",
         "tab_bg": "#0b101b",
         "tab_sel": "#1e293b",
@@ -63,6 +65,8 @@ THEMES: dict[str, dict[str, str]] = {
         "control_hover": "#293852",
         "control_border": "#26334a",
         "dropdown_bg": "#090c12",
+        "dropdown_hover": "#161f30",
+        "dropdown_text": "#f1f5f9",
         "track_bg": "#1c2638",
         "tab_bg": "#030508",
         "tab_sel": "#161f30",
@@ -99,6 +103,8 @@ THEMES: dict[str, dict[str, str]] = {
         "control_hover": "#cbd5e1",
         "control_border": "#cbd5e1",
         "dropdown_bg": "#ffffff",
+        "dropdown_hover": "#e2e8f0",
+        "dropdown_text": "#0f172a",
         "track_bg": "#cbd5e1",
         "tab_bg": "#e2e8f0",
         "tab_sel": "#ffffff",
@@ -751,6 +757,148 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "hk_mouse5": "Mouse 5 (Lateral)",
     },
 }
+
+
+BUILTIN_PRESET_NAMES: dict[str, dict[str, str]] = {
+    "Normal (Limpo + Gate)": {
+        "pt": "Normal (Limpo + Gate)",
+        "en": "Normal (Clean + Gate)",
+        "es": "Normal (Limpio + Gate)",
+    },
+    "Locutor / Podcast (Estúdio)": {
+        "pt": "Locutor / Podcast (Estúdio)",
+        "en": "Broadcaster / Podcast (Studio)",
+        "es": "Locutor / Podcast (Estudio)",
+    },
+    "Voz Grossa / Demônio": {
+        "pt": "Voz Grossa / Demônio",
+        "en": "Deep Voice / Demon",
+        "es": "Voz Grave / Demonio",
+    },
+    "Monstro Abissal / Gigante": {
+        "pt": "Monstro Abissal / Gigante",
+        "en": "Abyssal Monster / Giant",
+        "es": "Monstruo Abisal / Gigante",
+    },
+    "Voz Fina / Esquilo": {
+        "pt": "Voz Fina / Esquilo",
+        "en": "High Pitch / Chipmunk",
+        "es": "Voz Aguda / Ardilla",
+    },
+    "Duende / Goblin Travesso": {
+        "pt": "Duende / Goblin Travesso",
+        "en": "Imp / Mischievous Goblin",
+        "es": "Duende / Goblin Travieso",
+    },
+    "Robô / Ciborgue": {
+        "pt": "Robô / Ciborgue",
+        "en": "Robot / Cyborg",
+        "es": "Robot / Cíborg",
+    },
+    "Vocoder Synth (Daft)": {
+        "pt": "Vocoder Synth (Daft)",
+        "en": "Vocoder Synth (Daft)",
+        "es": "Vocoder Synth (Daft)",
+    },
+    "Sussurro Fantasma (Vocoder)": {
+        "pt": "Sussurro Fantasma (Vocoder)",
+        "en": "Ghost Whisper (Vocoder)",
+        "es": "Susurro Fantasma (Vocoder)",
+    },
+    "Phaser Espacial (Sci-Fi)": {
+        "pt": "Phaser Espacial (Sci-Fi)",
+        "en": "Space Phaser (Sci-Fi)",
+        "es": "Phaser Espacial (Sci-Fi)",
+    },
+    "Auto-Wah / Funk (Wahwah)": {
+        "pt": "Auto-Wah / Funk (Wahwah)",
+        "en": "Auto-Wah / Funk (Wahwah)",
+        "es": "Auto-Wah / Funk (Wahwah)",
+    },
+    "Flanger Metálico (Jato)": {
+        "pt": "Flanger Metálico (Jato)",
+        "en": "Metallic Flanger (Jet)",
+        "es": "Flanger Metálico (Jet)",
+    },
+    "Voz Subaquática (Tremolo + Wah)": {
+        "pt": "Voz Subaquática (Tremolo + Wah)",
+        "en": "Underwater Voice (Tremolo + Wah)",
+        "es": "Voz Subacuática (Tremolo + Wah)",
+    },
+    "Tremolo Assombrado (Terror)": {
+        "pt": "Tremolo Assombrado (Terror)",
+        "en": "Haunted Tremolo (Horror)",
+        "es": "Tremolo Embrujado (Terror)",
+    },
+    "Coro Épico (Chorus + Reverb)": {
+        "pt": "Coro Épico (Chorus + Reverb)",
+        "en": "Epic Choir (Chorus + Reverb)",
+        "es": "Coro Épico (Chorus + Reverb)",
+    },
+    "Catedral / Deus Épico": {
+        "pt": "Catedral / Deus Épico",
+        "en": "Cathedral / Epic God",
+        "es": "Catedral / Dios Épico",
+    },
+    "Alienígena (Freq Shifter)": {
+        "pt": "Alienígena (Freq Shifter)",
+        "en": "Alien (Freq Shifter)",
+        "es": "Alienígena (Freq Shifter)",
+    },
+    "Megafone / Estádio": {
+        "pt": "Megafone / Estádio",
+        "en": "Megaphone / Stadium",
+        "es": "Megáfono / Estadio",
+    },
+    "Rádio Militar / Walkie-Talkie": {
+        "pt": "Rádio Militar / Walkie-Talkie",
+        "en": "Military Radio / Walkie-Talkie",
+        "es": "Radio Militar / Walkie-Talkie",
+    },
+    "Rádio AM Retrô (8-Bit Lo-Fi)": {
+        "pt": "Rádio AM Retrô (8-Bit Lo-Fi)",
+        "en": "Retro AM Radio (8-Bit Lo-Fi)",
+        "es": "Radio AM Retro (8-Bit Lo-Fi)",
+    },
+    "Astronauta (Rádio Espacial)": {
+        "pt": "Astronauta (Rádio Espacial)",
+        "en": "Astronaut (Space Radio)",
+        "es": "Astronauta (Radio Espacial)",
+    },
+    "Capacete / Darth Vader": {
+        "pt": "Capacete / Darth Vader",
+        "en": "Helmet / Darth Vader",
+        "es": "Casco / Darth Vader",
+    },
+    "Caverna / Eco Épico": {
+        "pt": "Caverna / Eco Épico",
+        "en": "Cave / Epic Echo",
+        "es": "Cueva / Eco Épico",
+    },
+    "Voz Anônima (Entrevista)": {
+        "pt": "Voz Anônima (Entrevista)",
+        "en": "Anonymous Voice (Interview)",
+        "es": "Voz Anónima (Entrevista)",
+    },
+}
+
+_PRESET_REVERSE_MAP: dict[str, str] = {}
+for _canonical, _loc_map in BUILTIN_PRESET_NAMES.items():
+    _PRESET_REVERSE_MAP[_canonical] = _canonical
+    for _loc_val in _loc_map.values():
+        _PRESET_REVERSE_MAP[_loc_val] = _canonical
+
+
+def preset_to_display(lang: str, canonical_name: str) -> str:
+    lang_code = lang if lang in TRANSLATIONS else "pt"
+    entry = BUILTIN_PRESET_NAMES.get(canonical_name)
+    if entry is not None:
+        return entry.get(lang_code, canonical_name)
+    return canonical_name
+
+
+def preset_to_internal(display_name: str) -> str:
+    return _PRESET_REVERSE_MAP.get(display_name, display_name)
 
 
 def tr(lang: str, key: str, **kwargs) -> str:
