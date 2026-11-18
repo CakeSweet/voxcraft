@@ -34,6 +34,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
+      - name: Embed build repository metadata
+        shell: pwsh
+        run: |
+          @{ repo = "${{ github.repository }}" } | ConvertTo-Json | Set-Content -Path "assets\build_info.json" -Encoding UTF8
+
       - name: Build VoxCraftStudio (Folder for Installer)
         run: |
           pyinstaller --noconfirm --clean --windowed `

@@ -15,6 +15,8 @@ import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
+import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -28,6 +30,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(sys.executable if IS_FROZEN else __fi
 ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", BASE_DIR), "assets")
 ICON_ICO_PATH = os.path.join(ASSETS_DIR, "voxcraft.ico")
 ICON_PNG_PATH = os.path.join(ASSETS_DIR, "voxcraft.png")
+BUILD_INFO_PATH = os.path.join(ASSETS_DIR, "build_info.json")
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -2056,7 +2059,26 @@ class VoxCraftApp(ctk.CTk):
         except Exception as e:
             return 1, str(e)
 
+    @staticmethod
+    def _read_build_info() -> dict:
+        try:
+            if os.path.exists(BUILD_INFO_PATH):
+                with open(BUILD_INFO_PATH, "r", encoding="utf-8-sig") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
+        except Exception:
+            pass
+        return {}
+
     def _detect_github_repo(self) -> str:
+        saved = str((self.app_config or {}).get("github_repo", "")).strip()
+        if saved and "/" in saved:
+            return saved.strip("/").removesuffix(".git")
+        binfo = self._read_build_info()
+        ci_repo = str(binfo.get("repo", "")).strip()
+        if ci_repo and "/" in ci_repo:
+            return ci_repo.strip("/").removesuffix(".git")
         if os.path.isdir(os.path.join(BASE_DIR, ".git")) and shutil.which("git"):
             rc, url = self._run_cmd(["git", "config", "--get", "remote.origin.url"], BASE_DIR)
             if rc == 0 and url:
@@ -2066,16 +2088,48 @@ class VoxCraftApp(ctk.CTk):
         return GITHUB_REPO
 
     @staticmethod
-    def _download_bytes(url: str, timeout: int = 25) -> bytes:
-        req = urllib.request.Request(url, headers={"User-Agent": "VoxCraft-Studio-Updater/1.0"})
+    def _download_bytes(
+        url: str,
+        timeout: int = 25,
+        token: str = "",
+        accept: str = "",
+        method: str = "GET",
+    ) -> tuple[bytes, str]:
+        class _CrossHostAuthStripRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+                if new_req is not None:
+                    old_host = urllib.parse.urlparse(req.full_url).netloc.lower()
+                    new_host = urllib.parse.urlparse(new_req.full_url).netloc.lower()
+                    if old_host != new_host:
+                        for h in ("Authorization", "authorization"):
+                            new_req.headers.pop(h, None)
+                            new_req.unredirected_hdrs.pop(h, None)
+                return new_req
+
+        headers = {"User-Agent": "VoxCraft-Studio-Updater/1.0"}
+        if accept:
+            headers["Accept"] = accept
+        if token:
+            headers["Authorization"] = f"Bearer {token.strip()}"
+
+        req = urllib.request.Request(url, headers=headers, method=method)
+
+        def _open_with_ctx(ctx=None):
+            handlers = [_CrossHostAuthStripRedirect()]
+            if ctx is not None:
+                handlers.append(urllib.request.HTTPSHandler(context=ctx))
+            opener = urllib.request.build_opener(*handlers)
+            with opener.open(req, timeout=timeout) as resp:
+                data = b"" if method == "HEAD" else resp.read()
+                return data, resp.geturl()
+
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
+            return _open_with_ctx()
         except Exception as e:
             if "CERTIFICATE_VERIFY_FAILED" in str(e):
                 ctx = ssl._create_unverified_context()
-                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-                    return resp.read()
+                return _open_with_ctx(ctx=ctx)
             raise
 
     @staticmethod
@@ -2113,7 +2167,7 @@ class VoxCraftApp(ctk.CTk):
 
         win = ctk.CTkToplevel(self)
         win.title("Atualizar VoxCraft Studio")
-        w, h = 560, 325
+        w, h = 580, 420
         self.update_idletasks()
         px = self.winfo_rootx() + max(0, (self.winfo_width() - w) // 2)
         py = self.winfo_rooty() + max(0, (self.winfo_height() - h) // 2)
@@ -2122,46 +2176,108 @@ class VoxCraftApp(ctk.CTk):
         win.transient(self)
         win.configure(fg_color="#0f172a")
 
+        hdr_row = ctk.CTkFrame(win, fg_color="transparent")
+        hdr_row.pack(fill="x", padx=20, pady=(16, 4))
         ctk.CTkLabel(
-            win, text="Atualização do VoxCraft Studio", font=ctk.CTkFont(size=17, weight="bold"), text_color="#38bdf8"
-        ).pack(anchor="w", padx=20, pady=(16, 6))
+            hdr_row, text="Atualização do VoxCraft Studio", font=ctk.CTkFont(size=17, weight="bold"), text_color="#38bdf8"
+        ).pack(side="left")
+        ctk.CTkLabel(
+            hdr_row, text=f"v{APP_VERSION}", font=ctk.CTkFont(size=11, weight="bold"), text_color="#64748b"
+        ).pack(side="right")
 
         msg_lbl = ctk.CTkLabel(
             win,
             text="Verificando atualizações...",
             justify="left",
-            wraplength=515,
+            wraplength=536,
             font=ctk.CTkFont(size=12),
             text_color="#cbd5e1",
         )
-        msg_lbl.pack(anchor="w", padx=20, pady=8)
+        msg_lbl.pack(anchor="w", padx=20, pady=(6, 8))
 
-        progress = ctk.CTkProgressBar(win, mode="indeterminate", width=510, fg_color="#243247", progress_color="#38bdf8")
-        progress.pack(padx=20, pady=(6, 14))
+        progress = ctk.CTkProgressBar(win, mode="indeterminate", width=536, fg_color="#243247", progress_color="#38bdf8")
+        progress.pack(padx=20, pady=(2, 12))
         progress.start()
 
-        btn_row = ctk.CTkFrame(win, fg_color="transparent")
-        btn_row.pack(fill="x", padx=20, pady=(6, 14))
+        # Configuração compacta do repositório (útil se o repo for privado ou tiver outro nome)
+        cfg_card = ctk.CTkFrame(
+            win, fg_color="#161f30", corner_radius=10, border_width=1, border_color="#233044"
+        )
+        cfg_card.pack(fill="x", padx=20, pady=(0, 12))
 
-        action_btn = ctk.CTkButton(btn_row, text="Atualizar Agora", width=185, corner_radius=8, fg_color="#059669", hover_color="#10b981", state="disabled")
+        repo_var = ctk.StringVar(value=self._detect_github_repo())
+        token_var = ctk.StringVar(value=str((self.app_config or {}).get("github_token", "")))
+
+        r1 = ctk.CTkFrame(cfg_card, fg_color="transparent")
+        r1.pack(fill="x", padx=12, pady=(10, 6))
+        ctk.CTkLabel(r1, text="Repositório", width=92, anchor="w", font=ctk.CTkFont(size=11), text_color="#94a3b8").pack(side="left")
+        repo_entry = ctk.CTkEntry(
+            r1, textvariable=repo_var, height=28, corner_radius=7, fg_color="#0b101b", border_color="#243247", font=ctk.CTkFont(size=11)
+        )
+        repo_entry.pack(side="left", fill="x", expand=True, padx=(4, 8))
+        recheck_btn = ctk.CTkButton(
+            r1,
+            text="Verificar",
+            width=84,
+            height=28,
+            corner_radius=7,
+            fg_color="#1e293b",
+            hover_color="#2563eb",
+            border_width=1,
+            border_color="#334155",
+            font=ctk.CTkFont(size=11, weight="bold"),
+        )
+        recheck_btn.pack(side="right")
+
+        r2 = ctk.CTkFrame(cfg_card, fg_color="transparent")
+        r2.pack(fill="x", padx=12, pady=(0, 10))
+        ctk.CTkLabel(r2, text="Token GitHub", width=92, anchor="w", font=ctk.CTkFont(size=11), text_color="#94a3b8").pack(side="left")
+        token_entry = ctk.CTkEntry(
+            r2,
+            textvariable=token_var,
+            show="*",
+            placeholder_text="Opcional (somente se o repositório for privado)",
+            height=28,
+            corner_radius=7,
+            fg_color="#0b101b",
+            border_color="#243247",
+            font=ctk.CTkFont(size=11),
+        )
+        token_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(fill="x", padx=20, pady=(4, 14))
+
+        action_btn = ctk.CTkButton(
+            btn_row,
+            text="Atualizar Agora",
+            width=185,
+            height=34,
+            corner_radius=8,
+            fg_color="#059669",
+            hover_color="#10b981",
+            state="disabled",
+        )
         action_btn.pack(side="left")
 
-        zip_local_btn = ctk.CTkButton(
+        local_btn = ctk.CTkButton(
             btn_row,
-            text="Atualizar de .zip Local",
-            width=155,
+            text="Instalar (.exe / .zip)",
+            width=165,
+            height=34,
             corner_radius=8,
             fg_color="#1e293b",
             hover_color="#2563eb",
             border_width=1,
             border_color="#334155",
         )
-        zip_local_btn.pack(side="left", padx=(10, 0))
+        local_btn.pack(side="left", padx=(10, 0))
 
         close_btn = ctk.CTkButton(
             btn_row,
             text="Fechar",
             width=95,
+            height=34,
             corner_radius=8,
             fg_color="#1e293b",
             hover_color="#334155",
@@ -2187,9 +2303,37 @@ class VoxCraftApp(ctk.CTk):
             except Exception:
                 pass
 
+        def _persist_github_prefs() -> tuple[str, str]:
+            slug = repo_var.get().strip().strip("/").removesuffix(".git")
+            if slug.startswith("https://github.com/"):
+                slug = slug[len("https://github.com/"):].strip("/")
+            tok = token_var.get().strip()
+            if slug:
+                self.app_config["github_repo"] = slug
+            else:
+                slug = self._detect_github_repo()
+            if tok:
+                self.app_config["github_token"] = tok
+            else:
+                self.app_config.pop("github_token", None)
+            self._save_config()
+            return slug, tok
+
+        def _set_busy(text: str):
+            safe_ui(lambda: (
+                action_btn.configure(state="disabled"),
+                local_btn.configure(state="disabled"),
+                recheck_btn.configure(state="disabled"),
+                close_btn.configure(state="disabled"),
+                progress.configure(mode="indeterminate"),
+                progress.start(),
+                msg_lbl.configure(text=text, text_color="#38bdf8"),
+            ))
+
         def finish_message(text: str, color: str = "#e2e8f0", enable_action: bool = False, btn_text: str = "Atualizar Agora", cmd=None):
             def _ui():
                 progress.stop()
+                progress.configure(mode="determinate")
                 progress.set(1.0)
                 msg_lbl.configure(text=text, text_color=color)
                 if enable_action and cmd is not None:
@@ -2197,7 +2341,8 @@ class VoxCraftApp(ctk.CTk):
                 else:
                     action_btn.configure(state="disabled")
                 close_btn.configure(state="normal")
-                zip_local_btn.configure(state="normal")
+                local_btn.configure(state="normal")
+                recheck_btn.configure(state="normal")
             safe_ui(_ui)
 
         def install_deps_and_relaunch():
@@ -2206,53 +2351,81 @@ class VoxCraftApp(ctk.CTk):
                 self._run_cmd([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"], BASE_DIR)
             safe_ui(lambda: self._relaunch_after_update(win))
 
-        def apply_local_zip():
-            if IS_FROZEN:
-                messagebox.showinfo(
-                    "Versão Executável (.exe)",
-                    "Você está rodando a versão executável instalada (.exe).\n"
-                    "Para atualizar o .exe, baixe o novo instalador ou execute a partir do código Python.",
-                    parent=win,
-                )
-                return
-            zip_path = filedialog.askopenfilename(
-                parent=win,
-                title="Selecione o arquivo .zip do VoxCraft Studio",
-                filetypes=[("Arquivo ZIP", "*.zip")],
+        def _launch_exe_installer(exe_path: str):
+            self.app_config["pending_update_restore"] = True
+            self.app_config["was_running_before_update"] = bool(self.router.running)
+            self._save_config(include_params=True)
+            try:
+                win.grab_release()
+                win.destroy()
+            except Exception:
+                pass
+            try:
+                subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path) or tempfile.gettempdir())
+            except Exception as err:
+                messagebox.showerror("Erro ao abrir instalador", f"Instalador salvo em:\n{exe_path}\n\nErro: {err}")
+            self._quit_app()
+
+        def apply_local_file():
+            filetypes = (
+                [("Instalador ou ZIP", "*.exe *.zip"), ("Instalador (.exe)", "*.exe"), ("Arquivo ZIP", "*.zip")]
+                if IS_FROZEN
+                else [("Arquivo ZIP ou Instalador", "*.zip *.exe"), ("Arquivo ZIP", "*.zip"), ("Instalador (.exe)", "*.exe")]
             )
-            if not zip_path:
+            picked = filedialog.askopenfilename(
+                parent=win,
+                title="Selecione o instalador (.exe) ou pacote (.zip)",
+                filetypes=filetypes,
+            )
+            if not picked:
                 return
 
             def _worker():
-                safe_ui(lambda: (
-                    action_btn.configure(state="disabled"),
-                    zip_local_btn.configure(state="disabled"),
-                    close_btn.configure(state="disabled"),
-                    progress.start(),
-                    msg_lbl.configure(text="Aplicando arquivos do .zip selecionado...", text_color="#38bdf8"),
-                ))
+                _set_busy("Preparando arquivo selecionado...")
                 try:
-                    n_files = self._extract_zip_preserving_config(zip_path)
+                    if picked.lower().endswith(".exe"):
+                        safe_ui(lambda: _launch_exe_installer(picked))
+                        return
+
+                    if IS_FROZEN:
+                        with zipfile.ZipFile(picked) as zf:
+                            exe_members = [
+                                m for m in zf.infolist()
+                                if not m.is_dir() and m.filename.lower().endswith(".exe")
+                            ]
+                            if not exe_members:
+                                finish_message(
+                                    "Este .zip não contém um arquivo .exe.\n"
+                                    "Para atualizar a versão instalada, selecione VoxCraftStudio_Setup.exe "
+                                    "(ou o .zip do artifact baixado do GitHub Actions).",
+                                    "#f59e0b",
+                                )
+                                return
+                            chosen_m = next(
+                                (m for m in exe_members if "setup" in os.path.basename(m.filename).lower()),
+                                exe_members[0],
+                            )
+                            out_exe = os.path.join(tempfile.gettempdir(), os.path.basename(chosen_m.filename))
+                            with zf.open(chosen_m) as src, open(out_exe, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+                        safe_ui(lambda: _launch_exe_installer(out_exe))
+                        return
+
+                    n_files = self._extract_zip_preserving_config(picked)
                     if n_files == 0:
                         finish_message("Nenhum arquivo válido encontrado dentro do .zip.", "#ef4444")
                         return
                     install_deps_and_relaunch()
                 except Exception as e:
-                    finish_message(f"Erro ao extrair .zip:\n{e}", "#ef4444")
+                    finish_message(f"Erro ao processar arquivo:\n{e}", "#ef4444")
 
             threading.Thread(target=_worker, daemon=True).start()
 
-        zip_local_btn.configure(command=apply_local_zip)
+        local_btn.configure(command=apply_local_file)
 
         def apply_git_update(target_ref: str, force_reset: bool = False):
             def _worker():
-                safe_ui(lambda: (
-                    action_btn.configure(state="disabled"),
-                    zip_local_btn.configure(state="disabled"),
-                    close_btn.configure(state="disabled"),
-                    progress.start(),
-                    msg_lbl.configure(text="Baixando e aplicando atualização via Git...", text_color="#38bdf8"),
-                ))
+                _set_busy("Baixando e aplicando atualização via Git...")
                 if force_reset:
                     rc, out = self._run_cmd(["git", "reset", "--hard", target_ref], BASE_DIR)
                 else:
@@ -2264,7 +2437,7 @@ class VoxCraftApp(ctk.CTk):
                         rc, out = self._run_cmd(["git", "reset", "--hard", target_ref], BASE_DIR)
                 if rc != 0:
                     finish_message(
-                        f"Falha ao atualizar via Git:\n{out[:260]}\n\nVocê pode usar 'Atualizar de .zip Local'.",
+                        f"Falha ao atualizar via Git:\n{out[:260]}\n\nVocê pode usar 'Instalar (.exe / .zip)'.",
                         "#ef4444",
                     )
                     return
@@ -2272,28 +2445,26 @@ class VoxCraftApp(ctk.CTk):
 
             threading.Thread(target=_worker, daemon=True).start()
 
-        def apply_github_zip_update(repo_slug: str):
+        def apply_github_zip_update(repo_slug: str, token: str = ""):
             def _worker():
-                safe_ui(lambda: (
-                    action_btn.configure(state="disabled"),
-                    zip_local_btn.configure(state="disabled"),
-                    close_btn.configure(state="disabled"),
-                    progress.start(),
-                    msg_lbl.configure(text=f"Baixando última versão de github.com/{repo_slug}...", text_color="#38bdf8"),
-                ))
+                _set_busy(f"Baixando última versão de github.com/{repo_slug}...")
                 raw_zip = None
                 last_err = ""
                 for branch in ("main", "master"):
-                    url = f"https://github.com/{repo_slug}/archive/refs/heads/{branch}.zip"
+                    url = (
+                        f"https://api.github.com/repos/{repo_slug}/zipball/{branch}"
+                        if token
+                        else f"https://github.com/{repo_slug}/archive/refs/heads/{branch}.zip"
+                    )
                     try:
-                        raw_zip = self._download_bytes(url, timeout=25)
+                        raw_zip, _ = self._download_bytes(url, timeout=30, token=token)
                         break
                     except Exception as e:
                         last_err = str(e)
                 if not raw_zip:
                     finish_message(
                         f"Não foi possível baixar do GitHub ({repo_slug}):\n{last_err}\n\n"
-                        "Se o repositório for privado ou offline, use o botão 'Atualizar de .zip Local'.",
+                        "Se o repositório for privado, preencha o Token GitHub acima ou use 'Instalar (.exe / .zip)'.",
                         "#ef4444",
                     )
                     return
@@ -2306,17 +2477,19 @@ class VoxCraftApp(ctk.CTk):
 
             threading.Thread(target=_worker, daemon=True).start()
 
-        def apply_exe_release_update(download_url: str, asset_name: str):
+        def apply_exe_release_update(download_url: str, asset_name: str, api_asset_url: str = "", token: str = ""):
             def _worker():
-                safe_ui(lambda: (
-                    action_btn.configure(state="disabled"),
-                    zip_local_btn.configure(state="disabled"),
-                    close_btn.configure(state="disabled"),
-                    progress.start(),
-                    msg_lbl.configure(text=f"Baixando {asset_name} do GitHub Releases...", text_color="#38bdf8"),
-                ))
+                _set_busy(f"Baixando {asset_name} do GitHub Releases...")
                 try:
-                    raw_exe = self._download_bytes(download_url, timeout=90)
+                    if token and api_asset_url:
+                        raw_exe, _ = self._download_bytes(
+                            api_asset_url,
+                            timeout=120,
+                            token=token,
+                            accept="application/octet-stream",
+                        )
+                    else:
+                        raw_exe, _ = self._download_bytes(download_url, timeout=120)
                     out_path = os.path.join(tempfile.gettempdir(), asset_name)
                     with open(out_path, "wb") as f:
                         f.write(raw_exe)
@@ -2324,159 +2497,185 @@ class VoxCraftApp(ctk.CTk):
                     finish_message(f"Falha ao baixar instalador (.exe):\n{e}", "#ef4444")
                     return
 
-                def _launch_installer():
-                    self.app_config["pending_update_restore"] = True
-                    self.app_config["was_running_before_update"] = bool(self.router.running)
-                    self._save_config(include_params=True)
-                    try:
-                        win.grab_release()
-                        win.destroy()
-                    except Exception:
-                        pass
-                    try:
-                        subprocess.Popen([out_path], cwd=tempfile.gettempdir())
-                    except Exception as err:
-                        messagebox.showerror("Erro ao abrir instalador", f"Instalador salvo em:\n{out_path}\n\nErro: {err}")
-                    self._quit_app()
-
-                safe_ui(_launch_installer)
+                safe_ui(lambda: _launch_exe_installer(out_path))
 
             threading.Thread(target=_worker, daemon=True).start()
 
-        def check_worker():
-            try:
+        def run_check(save_inputs: bool = False):
+            if save_inputs:
+                repo_slug, token = _persist_github_prefs()
+            else:
                 repo_slug = self._detect_github_repo()
-                if IS_FROZEN:
-                    rel = None
-                    last_err = None
-                    for api_url in (
-                        f"https://api.github.com/repos/{repo_slug}/releases/latest",
-                        f"https://api.github.com/repos/{repo_slug}/releases?per_page=5",
-                    ):
-                        try:
-                            raw = self._download_bytes(api_url, timeout=15)
-                            parsed = json.loads(raw.decode("utf-8"))
-                            if isinstance(parsed, list):
-                                rel = next((r for r in parsed if not r.get("draft")), parsed[0] if parsed else None)
-                            elif isinstance(parsed, dict):
-                                rel = parsed
-                            if rel:
-                                break
-                        except Exception as e:
-                            last_err = e
+                token = str((self.app_config or {}).get("github_token", "")).strip()
 
-                    if rel is None:
-                        # Fallback direto sem API caso haja limite de requisições do GitHub
-                        direct_url = f"https://github.com/{repo_slug}/releases/latest/download/VoxCraftStudio_Setup.exe"
-                        try:
-                            req = urllib.request.Request(
-                                direct_url, method="HEAD", headers={"User-Agent": "VoxCraft-Studio-Updater/1.0"}
-                            )
+            _set_busy(f"Consultando atualizações em github.com/{repo_slug}...")
+
+            def check_worker():
+                try:
+                    if IS_FROZEN:
+                        rel = None
+                        last_err = None
+                        saw_empty_releases = False
+                        api_accept = "application/vnd.github+json"
+
+                        for api_url in (
+                            f"https://api.github.com/repos/{repo_slug}/releases/latest",
+                            f"https://api.github.com/repos/{repo_slug}/releases?per_page=10",
+                            f"https://api.github.com/repos/{repo_slug}/releases/tags/latest",
+                        ):
                             try:
-                                with urllib.request.urlopen(req, timeout=12) as resp:
-                                    final_url = resp.geturl()
-                            except Exception as e_ssl:
-                                if "CERTIFICATE_VERIFY_FAILED" in str(e_ssl):
-                                    ctx = ssl._create_unverified_context()
-                                    with urllib.request.urlopen(req, timeout=12, context=ctx) as resp:
-                                        final_url = resp.geturl()
-                                else:
-                                    raise
+                                raw, _ = self._download_bytes(api_url, timeout=15, token=token, accept=api_accept)
+                                parsed = json.loads(raw.decode("utf-8"))
+                                if isinstance(parsed, list):
+                                    if len(parsed) == 0:
+                                        saw_empty_releases = True
+                                    non_draft = [r for r in parsed if not r.get("draft")]
+                                    rel = next(
+                                        (r for r in non_draft if any(str(a.get("name", "")).lower().endswith(".exe") for a in (r.get("assets") or []))),
+                                        non_draft[0] if non_draft else None,
+                                    )
+                                elif isinstance(parsed, dict) and parsed.get("id"):
+                                    rel = parsed
+                                if rel:
+                                    break
+                            except Exception as e:
+                                last_err = e
+
+                        if rel is None and not token:
+                            direct_url = f"https://github.com/{repo_slug}/releases/latest/download/VoxCraftStudio_Setup.exe"
+                            try:
+                                _, final_url = self._download_bytes(direct_url, timeout=12, method="HEAD")
+                                finish_message(
+                                    "Instalador encontrado no GitHub Releases (latest): VoxCraftStudio_Setup.exe\n"
+                                    "Clique em 'Baixar e Instalar (.exe)' para atualizar mantendo suas configurações.",
+                                    "#10b981",
+                                    enable_action=True,
+                                    btn_text="Baixar e Instalar (.exe)",
+                                    cmd=lambda: apply_exe_release_update(final_url, "VoxCraftStudio_Setup.exe"),
+                                )
+                                return
+                            except Exception:
+                                pass
+
+                        if rel is None:
+                            if saw_empty_releases:
+                                finish_message(
+                                    f"Nenhuma Release publicada ainda em github.com/{repo_slug}.\n"
+                                    "Aguarde o workflow do GitHub Actions publicar o instalador ou use 'Instalar (.exe / .zip)'.",
+                                    "#f59e0b",
+                                )
+                                return
+
+                            repo_exists = False
+                            try:
+                                self._download_bytes(
+                                    f"https://api.github.com/repos/{repo_slug}",
+                                    timeout=10,
+                                    token=token,
+                                    accept=api_accept,
+                                )
+                                repo_exists = True
+                            except Exception:
+                                repo_exists = False
+
+                            if repo_exists:
+                                finish_message(
+                                    f"Repositório encontrado (github.com/{repo_slug}), mas ainda não há Releases.\n"
+                                    "Publique uma Release no GitHub Actions ou use 'Instalar (.exe / .zip)'.",
+                                    "#f59e0b",
+                                )
+                            else:
+                                hint = (
+                                    "Verifique o Token GitHub (permissão Contents: Read) ou o nome do repositório."
+                                    if token
+                                    else "O repositório parece privado ou com outro nome.\n"
+                                         "Torne-o público, informe um Token GitHub acima, ou use 'Instalar (.exe / .zip)'."
+                                )
+                                finish_message(
+                                    f"Não foi possível acessar github.com/{repo_slug} ({last_err}).\n{hint}",
+                                    "#f59e0b",
+                                )
+                            return
+
+                        assets = rel.get("assets") or []
+                        chosen = next((a for a in assets if a.get("name") == "VoxCraftStudio_Setup.exe"), None)
+                        if chosen is None:
+                            chosen = next((a for a in assets if str(a.get("name", "")).lower().endswith(".exe")), None)
+                        if chosen and (chosen.get("browser_download_url") or chosen.get("url")):
+                            tag = rel.get("tag_name") or rel.get("name") or "latest"
+                            asset_name = chosen["name"]
+                            dl_url = chosen.get("browser_download_url", "")
+                            api_asset_url = chosen.get("url", "")
+                            pub = str(rel.get("published_at") or rel.get("created_at") or "")[:10]
+                            pub_txt = f" • {pub}" if pub else ""
                             finish_message(
-                                "Instalador encontrado no GitHub Releases (latest): VoxCraftStudio_Setup.exe\n"
-                                "Clique abaixo para baixar e executar o instalador automaticamente.\n"
-                                "Suas entradas, saídas e presets ficam salvos em %APPDATA%\\VoxCraftStudio.",
+                                f"Release encontrada ({tag}{pub_txt}): {asset_name}\n"
+                                "Clique em 'Baixar e Instalar (.exe)' para atualizar mantendo suas configurações.",
                                 "#10b981",
                                 enable_action=True,
                                 btn_text="Baixar e Instalar (.exe)",
-                                cmd=lambda: apply_exe_release_update(final_url, "VoxCraftStudio_Setup.exe"),
-                            )
-                            return
-                        except Exception:
-                            finish_message(
-                                f"Não foi possível consultar Releases de github.com/{repo_slug}:\n{last_err}\n\n"
-                                "Suas configurações ficam salvas em %APPDATA%\\VoxCraftStudio.",
-                                "#ef4444",
+                                cmd=lambda: apply_exe_release_update(dl_url, asset_name, api_asset_url, token),
                             )
                             return
 
-                    assets = rel.get("assets") or []
-                    chosen = next((a for a in assets if a.get("name") == "VoxCraftStudio_Setup.exe"), None)
-                    if chosen is None:
-                        chosen = next((a for a in assets if str(a.get("name", "")).lower().endswith(".exe")), None)
-                    if chosen and chosen.get("browser_download_url"):
-                        tag = rel.get("tag_name") or rel.get("name") or "latest"
-                        asset_name = chosen["name"]
-                        dl_url = chosen["browser_download_url"]
                         finish_message(
-                            f"Release encontrada no GitHub ({tag}): {asset_name}\n"
-                            "Clique abaixo para baixar e executar o instalador automaticamente.\n"
-                            "Suas entradas, saídas e presets ficam salvos em %APPDATA%\\VoxCraftStudio.",
-                            "#10b981",
-                            enable_action=True,
-                            btn_text="Baixar e Instalar (.exe)",
-                            cmd=lambda: apply_exe_release_update(dl_url, asset_name),
+                            f"Nenhum arquivo .exe encontrado na Release de github.com/{repo_slug}.\n"
+                            "Verifique se o workflow 'Build & Publish Windows Installer (.exe)' concluiu.",
+                            "#f59e0b",
                         )
                         return
+
+                    git_dir = os.path.join(BASE_DIR, ".git")
+                    has_git = os.path.isdir(git_dir) and (shutil.which("git") is not None)
+
+                    if has_git:
+                        rc, out = self._run_cmd(["git", "fetch", "origin"], BASE_DIR)
+                        if rc == 0:
+                            rc_u, upstream = self._run_cmd(
+                                ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], BASE_DIR
+                            )
+                            target = upstream if rc_u == 0 and upstream else "origin/main"
+                            rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
+                            if rc_r != 0:
+                                target = "origin/master"
+                                rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
+                            rc_h, local_sha = self._run_cmd(["git", "rev-parse", "HEAD"], BASE_DIR)
+                            if rc_h == 0 and rc_r == 0 and local_sha == remote_sha:
+                                finish_message(
+                                    "Você já está na versão mais recente do repositório Git!",
+                                    "#10b981",
+                                    enable_action=True,
+                                    btn_text="Forçar Reinstalação",
+                                    cmd=lambda: apply_git_update(target, force_reset=True),
+                                )
+                                return
+
+                            _, log_out = self._run_cmd(["git", "log", f"HEAD..{target}", "--oneline", "-n", "4"], BASE_DIR)
+                            summary = f"Nova atualização encontrada!\n{log_out}" if log_out else "Atualização disponível no GitHub."
+                            finish_message(
+                                f"{summary}\n\nSuas configurações serão mantidas.",
+                                "#e2e8f0",
+                                enable_action=True,
+                                btn_text="Aplicar Atualização",
+                                cmd=lambda: apply_git_update(target),
+                            )
+                            return
 
                     finish_message(
-                        f"Nenhum arquivo .exe encontrado nas Releases de github.com/{repo_slug}.\n"
-                        "Verifique se o workflow 'Build & Publish Windows Installer (.exe)' já concluiu no GitHub.",
-                        "#f59e0b",
+                        f"Pronto para baixar a atualização de github.com/{repo_slug}\n"
+                        "ou instalar a partir de um arquivo local.",
+                        "#e2e8f0",
+                        enable_action=True,
+                        btn_text="Baixar do GitHub",
+                        cmd=lambda: apply_github_zip_update(repo_slug, token),
                     )
-                    return
+                except Exception as exc:
+                    finish_message(f"Erro ao verificar atualizações:\n{exc}", "#ef4444")
 
-                git_dir = os.path.join(BASE_DIR, ".git")
-                has_git = os.path.isdir(git_dir) and (shutil.which("git") is not None)
+            threading.Thread(target=check_worker, daemon=True).start()
 
-                if has_git:
-                    rc, out = self._run_cmd(["git", "fetch", "origin"], BASE_DIR)
-                    if rc == 0:
-                        rc_u, upstream = self._run_cmd(
-                            ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], BASE_DIR
-                        )
-                        target = upstream if rc_u == 0 and upstream else "origin/main"
-                        rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
-                        if rc_r != 0:
-                            target = "origin/master"
-                            rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
-                        rc_h, local_sha = self._run_cmd(["git", "rev-parse", "HEAD"], BASE_DIR)
-                        if rc_h == 0 and rc_r == 0 and local_sha == remote_sha:
-                            finish_message(
-                                "Você já está na versão mais recente do repositório Git!\n"
-                                "Se quiser sincronizar mesmo assim ou usar um pacote exportado, clique abaixo.",
-                                "#10b981",
-                                enable_action=True,
-                                btn_text="Forçar Reinstalação",
-                                cmd=lambda: apply_git_update(target, force_reset=True),
-                            )
-                            return
-
-                        _, log_out = self._run_cmd(["git", "log", f"HEAD..{target}", "--oneline", "-n", "4"], BASE_DIR)
-                        summary = f"Nova atualização encontrada!\n{log_out}" if log_out else "Diferenças detectadas em relação ao GitHub."
-                        finish_message(
-                            f"{summary}\n\nSuas entradas, saídas, presets e atalhos serão mantidos.",
-                            "#e2e8f0",
-                            enable_action=True,
-                            btn_text="Aplicar Atualização",
-                            cmd=lambda: apply_git_update(target),
-                        )
-                        return
-
-                # Fallback sem Git (ZIP do GitHub ou .zip local)
-                finish_message(
-                    f"Pronto para baixar a atualização de github.com/{repo_slug}\n"
-                    "ou aplicar um arquivo .zip baixado manualmente.\n"
-                    "Suas entradas, saídas, presets e atalhos serão mantidos.",
-                    "#e2e8f0",
-                    enable_action=True,
-                    btn_text="Baixar do GitHub",
-                    cmd=lambda: apply_github_zip_update(repo_slug),
-                )
-            except Exception as exc:
-                finish_message(f"Erro ao verificar atualizações:\n{exc}", "#ef4444")
-
-        threading.Thread(target=check_worker, daemon=True).start()
+        recheck_btn.configure(command=lambda: run_check(save_inputs=True))
+        run_check(save_inputs=False)
 
     def _relaunch_after_update(self, modal_win=None):
         self.app_config["pending_update_restore"] = True
