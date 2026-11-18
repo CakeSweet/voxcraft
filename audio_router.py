@@ -131,6 +131,16 @@ class AudioRouter:
         return inputs, outputs
 
     @staticmethod
+    def refresh_backend() -> tuple[list[AudioDeviceItem], list[AudioDeviceItem]]:
+        """Reinicializa o PortAudio para detectar novos dispositivos USB/virtuais conectados."""
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception:
+            pass
+        return AudioRouter.list_devices()
+
+    @staticmethod
     def _candidate_rates(dev_info: dict, preferred: list[int] | None = None) -> list[int]:
         raw = []
         if preferred:

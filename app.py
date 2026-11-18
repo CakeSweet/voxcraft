@@ -21,7 +21,13 @@ except ImportError:
     pystray = None
 
 from dsp_engine import DSPParams, RealTimeDSPEngine, build_eq_sos
-from presets import get_builtin_presets, load_user_presets, save_user_presets
+from presets import (
+    get_builtin_presets,
+    load_app_config,
+    load_user_presets,
+    save_app_config,
+    save_user_presets,
+)
 from audio_router import AudioDeviceItem, AudioRouter
 
 ctk.set_appearance_mode("dark")
@@ -80,14 +86,27 @@ class VoxCraftApp(ctk.CTk):
 
         self.builtin_presets = get_builtin_presets()
         self.user_presets = load_user_presets()
+        self.app_config = load_app_config()
 
         self.in_devices: list[AudioDeviceItem] = []
         self.out_devices: list[AudioDeviceItem] = []
         self._syncing_ui = False
 
         self._build_layout()
-        self._refresh_devices()
-        self._apply_preset("Normal (Limpo + Gate)")
+        self._restore_saved_ui_prefs()
+        self._refresh_devices(reinit_backend=False, initial_load=True)
+
+        saved_preset = self.app_config.get("last_preset", "Normal (Limpo + Gate)")
+        if saved_preset in self.builtin_presets:
+            self.preset_var.set(saved_preset)
+            self._apply_preset(saved_preset, save_cfg=False)
+        elif saved_preset in self.user_presets:
+            self.preset_var.set(f"★ {saved_preset}")
+            self._apply_preset(saved_preset, save_cfg=False)
+        else:
+            self.preset_var.set("Normal (Limpo + Gate)")
+            self._apply_preset("Normal (Limpo + Gate)", save_cfg=False)
+
         self._start_tray_icon()
         self._schedule_ui_loop()
         self.after(250, self._apply_window_icon)
@@ -256,14 +275,28 @@ class VoxCraftApp(ctk.CTk):
         side = ctk.CTkScrollableFrame(parent, width=320, corner_radius=10, fg_color="#161b24")
         side.pack(side="left", fill="y", padx=(0, 8))
 
+        routing_hdr = ctk.CTkFrame(side, fg_color="transparent")
+        routing_hdr.pack(fill="x", padx=10, pady=(6, 4))
         ctk.CTkLabel(
-            side, text="Roteamento de Áudio", font=ctk.CTkFont(size=15, weight="bold"), text_color="#e2e8f0"
-        ).pack(anchor="w", padx=10, pady=(6, 4))
+            routing_hdr, text="Roteamento de Áudio", font=ctk.CTkFont(size=15, weight="bold"), text_color="#e2e8f0"
+        ).pack(side="left")
+        ctk.CTkButton(
+            routing_hdr,
+            text="↻ Atualizar",
+            width=86,
+            height=26,
+            fg_color="#2563eb",
+            hover_color="#1d4ed8",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=lambda: self._refresh_devices(reinit_backend=True),
+        ).pack(side="right")
 
         # Entrada
         ctk.CTkLabel(side, text="Microfone (Entrada):", font=ctk.CTkFont(size=12)).pack(anchor="w", padx=10)
         self.in_dev_var = ctk.StringVar()
-        self.in_dev_menu = ctk.CTkOptionMenu(side, variable=self.in_dev_var, values=[""], width=285)
+        self.in_dev_menu = ctk.CTkOptionMenu(
+            side, variable=self.in_dev_var, values=[""], width=285, command=self._on_device_changed
+        )
         self.in_dev_menu.pack(padx=10, pady=(2, 8))
 
         # Saída
@@ -271,16 +304,20 @@ class VoxCraftApp(ctk.CTk):
             anchor="w", padx=10
         )
         self.out_dev_var = ctk.StringVar()
-        self.out_dev_menu = ctk.CTkOptionMenu(side, variable=self.out_dev_var, values=[""], width=285)
+        self.out_dev_menu = ctk.CTkOptionMenu(
+            side, variable=self.out_dev_var, values=[""], width=285, command=self._on_device_changed
+        )
         self.out_dev_menu.pack(padx=10, pady=(2, 8))
 
         # Monitoramento (Ouvir a própria voz)
         self.monitor_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
-            side, text="Ouvir minha voz (Monitor no Fone)", variable=self.monitor_var, command=self._restart_if_running
+            side, text="Ouvir minha voz (Monitor no Fone)", variable=self.monitor_var, command=self._on_routing_pref_changed
         ).pack(anchor="w", padx=10, pady=(4, 4))
         self.mon_dev_var = ctk.StringVar()
-        self.mon_dev_menu = ctk.CTkOptionMenu(side, variable=self.mon_dev_var, values=[""], width=285)
+        self.mon_dev_menu = ctk.CTkOptionMenu(
+            side, variable=self.mon_dev_var, values=[""], width=285, command=self._on_device_changed
+        )
         self.mon_dev_menu.pack(padx=10, pady=(2, 8))
 
         # Latência e Atualizar
@@ -293,7 +330,7 @@ class VoxCraftApp(ctk.CTk):
             variable=self.latency_var,
             values=["Ultra (256)", "Baixa (512)", "Estável (1024)"],
             width=145,
-            command=lambda _: self._restart_if_running(),
+            command=lambda _: self._on_routing_pref_changed(),
         ).pack(side="right")
 
         # Comportamento ao Fechar (Bandeja / Tray)
@@ -302,10 +339,17 @@ class VoxCraftApp(ctk.CTk):
             side,
             text="Ao fechar (X): Minimizar na Bandeja",
             variable=self.minimize_to_tray_var,
+            command=self._save_config,
         ).pack(anchor="w", padx=10, pady=(2, 6))
 
         ctk.CTkButton(
-            side, text="Atualizar Dispositivos", height=28, fg_color="#334155", command=self._refresh_devices
+            side,
+            text="↻ Atualizar Entradas e Saídas",
+            height=30,
+            fg_color="#1d4ed8",
+            hover_color="#1e40af",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=lambda: self._refresh_devices(reinit_backend=True),
         ).pack(fill="x", padx=10, pady=(2, 6))
 
         self.status_lbl = ctk.CTkLabel(
@@ -1122,11 +1166,15 @@ class VoxCraftApp(ctk.CTk):
         clean = choice[2:] if choice.startswith("★ ") else choice
         self._apply_preset(clean)
 
-    def _apply_preset(self, name: str):
+    def _apply_preset(self, name: str, save_cfg: bool = True):
         if name in self.builtin_presets:
             self._load_params_to_ui(self.builtin_presets[name].copy())
+            if save_cfg:
+                self._save_config()
         elif name in self.user_presets:
             self._load_params_to_ui(self.user_presets[name].copy())
+            if save_cfg:
+                self._save_config()
 
     def _save_custom_preset(self):
         name = simpledialog.askstring("Salvar Voz Personalizada", "Digite um nome para esta voz:", parent=self)
@@ -1137,6 +1185,7 @@ class VoxCraftApp(ctk.CTk):
         save_user_presets(self.user_presets)
         self.preset_menu.configure(values=self._all_preset_names())
         self.preset_var.set(f"★ {name}")
+        self._save_config()
 
     def _delete_custom_preset(self):
         sel = self.preset_var.get()
@@ -1152,10 +1201,103 @@ class VoxCraftApp(ctk.CTk):
             self._apply_preset("Normal (Limpo + Gate)")
 
     # ------------------------------------------------------------------ #
+    # Persistência de Entradas, Saídas e Preferências
+    # ------------------------------------------------------------------ #
+    def _restore_saved_ui_prefs(self):
+        cfg = self.app_config or {}
+        if "monitor_enabled" in cfg:
+            self.monitor_var.set(bool(cfg["monitor_enabled"]))
+        saved_lat = cfg.get("latency")
+        if saved_lat in ("Ultra (256)", "Baixa (512)", "Estável (1024)"):
+            self.latency_var.set(saved_lat)
+        if "minimize_to_tray" in cfg and pystray is not None:
+            self.minimize_to_tray_var.set(bool(cfg["minimize_to_tray"]))
+
+    @staticmethod
+    def _device_to_dict(item: AudioDeviceItem | None) -> dict | None:
+        if item is None:
+            return None
+        return {"label": item.label, "name": item.name, "hostapi": item.hostapi}
+
+    def _save_config(self):
+        in_item = self._selected_device_item(self.in_dev_var.get(), self.in_devices)
+        out_item = self._selected_device_item(self.out_dev_var.get(), self.out_devices)
+        mon_item = self._selected_device_item(self.mon_dev_var.get(), self.out_devices)
+
+        # Mantém o dispositivo salvo anteriormente se estiver temporariamente desconectado
+        if in_item is not None:
+            self.app_config["input_device"] = self._device_to_dict(in_item)
+        if out_item is not None:
+            self.app_config["output_device"] = self._device_to_dict(out_item)
+        if mon_item is not None:
+            self.app_config["monitor_device"] = self._device_to_dict(mon_item)
+
+        preset_choice = self.preset_var.get()
+        clean_preset = preset_choice[2:] if preset_choice.startswith("★ ") else preset_choice
+        self.app_config["last_preset"] = clean_preset
+        self.app_config["monitor_enabled"] = bool(self.monitor_var.get())
+        self.app_config["latency"] = str(self.latency_var.get())
+        self.app_config["minimize_to_tray"] = bool(self.minimize_to_tray_var.get())
+        save_app_config(self.app_config)
+
+    def _on_device_changed(self, *_):
+        self._save_config()
+        self._restart_if_running()
+
+    def _on_routing_pref_changed(self):
+        self._save_config()
+        self._restart_if_running()
+
+    # ------------------------------------------------------------------ #
     # Dispositivos e Motor de Áudio
     # ------------------------------------------------------------------ #
-    def _refresh_devices(self):
-        self.in_devices, self.out_devices = AudioRouter.list_devices()
+    @staticmethod
+    def _match_device_label(
+        items: list[AudioDeviceItem],
+        labels: list[str],
+        prev_item: AudioDeviceItem | None,
+        saved_dict: dict | None,
+        fallback_fn,
+    ) -> str:
+        if not items or not labels:
+            return labels[0] if labels else ""
+
+        candidates: list[dict] = []
+        if prev_item is not None:
+            candidates.append({"label": prev_item.label, "name": prev_item.name, "hostapi": prev_item.hostapi})
+        if isinstance(saved_dict, dict):
+            candidates.append(saved_dict)
+
+        for cand in candidates:
+            c_label = cand.get("label")
+            if c_label and c_label in labels:
+                return c_label
+            c_name = cand.get("name")
+            c_api = cand.get("hostapi")
+            if c_name and c_api:
+                for d in items:
+                    if d.name == c_name and d.hostapi == c_api:
+                        return d.label
+            if c_name:
+                for d in items:
+                    if d.name == c_name:
+                        return d.label
+
+        return fallback_fn(labels)
+
+    def _refresh_devices(self, reinit_backend: bool = True, initial_load: bool = False):
+        was_running = self.router.running
+        prev_in = self._selected_device_item(self.in_dev_var.get(), self.in_devices)
+        prev_out = self._selected_device_item(self.out_dev_var.get(), self.out_devices)
+        prev_mon = self._selected_device_item(self.mon_dev_var.get(), self.out_devices)
+
+        if reinit_backend:
+            if was_running:
+                self.router.stop()
+            self.in_devices, self.out_devices = AudioRouter.refresh_backend()
+        else:
+            self.in_devices, self.out_devices = AudioRouter.list_devices()
+
         in_labels = [d.label for d in self.in_devices] or ["Nenhum microfone encontrado"]
         out_labels = [d.label for d in self.out_devices] or ["Nenhuma saída encontrada"]
 
@@ -1163,23 +1305,50 @@ class VoxCraftApp(ctk.CTk):
         self.out_dev_menu.configure(values=out_labels)
         self.mon_dev_menu.configure(values=out_labels)
 
-        if in_labels and self.in_dev_var.get() not in in_labels:
-            self.in_dev_var.set(in_labels[0])
+        sel_in = self._match_device_label(
+            self.in_devices,
+            in_labels,
+            prev_in,
+            self.app_config.get("input_device"),
+            lambda lbls: lbls[0],
+        )
+        sel_out = self._match_device_label(
+            self.out_devices,
+            out_labels,
+            prev_out,
+            self.app_config.get("output_device"),
+            lambda lbls: next((lbl for lbl in lbls if "CABLE Input" in lbl or "VB-Audio" in lbl), lbls[0]),
+        )
+        sel_mon = self._match_device_label(
+            self.out_devices,
+            out_labels,
+            prev_mon,
+            self.app_config.get("monitor_device"),
+            lambda lbls: next((lbl for lbl in lbls if "CABLE" not in lbl), lbls[0]),
+        )
 
-        # Tenta selecionar VB-Cable automaticamente como Saída se existir
-        if out_labels and self.out_dev_var.get() not in out_labels:
-            vb = next((lbl for lbl in out_labels if "CABLE Input" in lbl or "VB-Audio" in lbl), out_labels[0])
-            self.out_dev_var.set(vb)
+        self.in_dev_var.set(sel_in)
+        self.out_dev_var.set(sel_out)
+        self.mon_dev_var.set(sel_mon)
+        self._save_config()
 
-        if out_labels and self.mon_dev_var.get() not in out_labels:
-            non_vb = next((lbl for lbl in out_labels if "CABLE" not in lbl), out_labels[0])
-            self.mon_dev_var.set(non_vb)
+        if was_running:
+            self._start_audio()
+        elif not initial_load:
+            self.status_lbl.configure(
+                text=f"Dispositivos atualizados ({len(self.in_devices)} entradas, {len(self.out_devices)} saídas) — seleções salvas.",
+                text_color="#38bdf8",
+            )
 
-    def _selected_device_index(self, label: str, items: list[AudioDeviceItem]) -> int | None:
+    def _selected_device_item(self, label: str, items: list[AudioDeviceItem]) -> AudioDeviceItem | None:
         for d in items:
             if d.label == label:
-                return d.index
+                return d
         return None
+
+    def _selected_device_index(self, label: str, items: list[AudioDeviceItem]) -> int | None:
+        item = self._selected_device_item(label, items)
+        return item.index if item is not None else None
 
     def _get_blocksize(self) -> int:
         txt = self.latency_var.get()
@@ -1352,6 +1521,7 @@ class VoxCraftApp(ctk.CTk):
 
     def _quit_app(self):
         self._is_quitting = True
+        self._save_config()
         self.router.stop()
         if self._tray_icon is not None:
             try:
