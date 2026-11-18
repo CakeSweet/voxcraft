@@ -378,14 +378,16 @@ class VoxCraftApp(ctk.CTk):
         self.tabs = ctk.CTkTabview(parent, corner_radius=10, fg_color="#161b24")
         self.tabs.pack(side="left", fill="both", expand=True)
 
-        t_pitch = self.tabs.add("1. Tom & Frequency Shifter")
-        t_eq = self.tabs.add("2. Equalizador (Audacity)")
-        t_fx = self.tabs.add("3. Robô, Rádio & Distorção")
-        t_space = self.tabs.add("4. Eco & Reverb")
-        t_mixer = self.tabs.add("5. Mixer Rápido")
+        t_pitch = self.tabs.add("1. Tom & Vocoder")
+        t_eq = self.tabs.add("2. Equalizador")
+        t_mod = self.tabs.add("3. Modulação (Audacity)")
+        t_fx = self.tabs.add("4. Robô & Distorção")
+        t_space = self.tabs.add("5. Eco & Reverb")
+        t_mixer = self.tabs.add("6. Mixer Rápido")
 
         self._build_pitch_tab(t_pitch)
         self._build_eq_tab(t_eq)
+        self._build_mod_tab(t_mod)
         self._build_fx_tab(t_fx)
         self._build_space_tab(t_space)
         self._build_mixer_tab(t_mixer)
@@ -483,6 +485,43 @@ class VoxCraftApp(ctk.CTk):
                 command=lambda v=hz_val: self._quick_fshift(v),
             ).pack(side="left", padx=4)
 
+        # Card: Vocoder (estilo Audacity)
+        card3 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        card3.pack(fill="x", padx=10, pady=8)
+
+        hdr3 = ctk.CTkFrame(card3, fg_color="transparent")
+        hdr3.pack(fill="x", padx=14, pady=(10, 4))
+        self.voc_en_var = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            hdr3,
+            text="Vocoder (estilo 'Vocoder' do Audacity — 12 Bandas)",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            variable=self.voc_en_var,
+            command=self._on_param_change,
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            card3,
+            text="Transforma a sua fala modulando uma onda sintetizada ou ruído de sussurro em 12 faixas de frequência (Daft Punk / Fantasma).",
+            font=ctk.CTkFont(size=11),
+            text_color="#94a3b8",
+        ).pack(anchor="w", padx=14, pady=(0, 8))
+
+        voc_row = ctk.CTkFrame(card3, fg_color="transparent")
+        voc_row.pack(fill="x", padx=14, pady=(0, 6))
+        ctk.CTkLabel(voc_row, text="Portadora (Carrier):", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 10))
+        self.voc_carrier_var = ctk.StringVar(value="Dente de Serra")
+        ctk.CTkOptionMenu(
+            voc_row,
+            variable=self.voc_carrier_var,
+            values=["Dente de Serra", "Acorde", "Quadrada", "Sussurro (Ruído)"],
+            command=lambda _: self._on_param_change(),
+        ).pack(side="left")
+
+        self.voc_freq_var = self._add_slider(card3, "Nota / Frequência Base", 55.0, 300.0, 110.0, "Hz", step=1.0)
+        self.voc_smooth_var = self._add_slider(card3, "Suavidade do Envelope", 10.0, 95.0, 45.0, "%", step=1.0)
+        self.voc_mix_var = self._add_slider(card3, "Mistura (Dry / Wet)", 0.0, 100.0, 85.0, "%", step=1.0)
+
     def _build_eq_tab(self, tab):
         top = ctk.CTkFrame(tab, fg_color="#0f172a", corner_radius=10)
         top.pack(fill="x", padx=10, pady=8)
@@ -541,6 +580,102 @@ class VoxCraftApp(ctk.CTk):
         self.eq_b3_var = self._add_vertical_eq_band(bands_frame, "Presença\n1.2 kHz")
         self.eq_b4_var = self._add_vertical_eq_band(bands_frame, "Brilho\n3.5 kHz")
         self.eq_b5_var = self._add_vertical_eq_band(bands_frame, "Agudo\n7.5 kHz")
+
+    def _build_mod_tab(self, tab):
+        scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+        scroll.pack(fill="both", expand=True)
+
+        # Phaser (estilo Audacity)
+        c1 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c1.pack(fill="x", padx=10, pady=8)
+        self.phaser_en_var = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            c1,
+            text="Phaser (estilo 'Phaser' do Audacity)",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            variable=self.phaser_en_var,
+            command=self._on_param_change,
+        ).pack(anchor="w", padx=14, pady=(10, 2))
+        ctk.CTkLabel(
+            c1,
+            text="Cria varreduras espaciais e futuristas de fase (efeito nave espacial / sci-fi).",
+            font=ctk.CTkFont(size=11),
+            text_color="#94a3b8",
+        ).pack(anchor="w", padx=14, pady=(0, 8))
+        self.phaser_stages_var = self._add_slider(c1, "Estágios (Stages)", 2.0, 12.0, 6.0, "x", step=2.0)
+        self.phaser_freq_var = self._add_slider(c1, "Velocidade LFO", 0.1, 6.0, 0.8, "Hz", step=0.1)
+        self.phaser_depth_var = self._add_slider(c1, "Profundidade (Depth)", 0.0, 100.0, 70.0, "%", step=1.0)
+        self.phaser_fb_var = self._add_slider(c1, "Feedback", -90.0, 90.0, 45.0, "%", step=1.0)
+        self.phaser_mix_var = self._add_slider(c1, "Mistura (Mix)", 0.0, 100.0, 60.0, "%", step=1.0)
+
+        # Wahwah (estilo Audacity)
+        c2 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c2.pack(fill="x", padx=10, pady=8)
+        self.wah_en_var = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            c2,
+            text="Wahwah (estilo 'Wahwah' do Audacity)",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            variable=self.wah_en_var,
+            command=self._on_param_change,
+        ).pack(anchor="w", padx=14, pady=(10, 2))
+        ctk.CTkLabel(
+            c2,
+            text="Filtro ressonante dinâmico que abre e fecha as frequências médias automaticamente.",
+            font=ctk.CTkFont(size=11),
+            text_color="#94a3b8",
+        ).pack(anchor="w", padx=14, pady=(0, 8))
+        self.wah_freq_var = self._add_slider(c2, "Frequência LFO", 0.2, 8.0, 1.5, "Hz", step=0.1)
+        self.wah_depth_var = self._add_slider(c2, "Profundidade (Depth)", 0.0, 100.0, 75.0, "%", step=1.0)
+        self.wah_res_var = self._add_slider(c2, "Ressonância (Q)", 0.5, 8.0, 2.8, "x", step=0.1)
+        self.wah_mix_var = self._add_slider(c2, "Mistura (Mix)", 0.0, 100.0, 75.0, "%", step=1.0)
+
+        # Chorus / Flanger
+        c3 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c3.pack(fill="x", padx=10, pady=8)
+        self.chorus_en_var = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            c3,
+            text="Chorus & Flanger (Coro / Voz Dupla / Jato)",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            variable=self.chorus_en_var,
+            command=self._on_param_change,
+        ).pack(anchor="w", padx=14, pady=(10, 2))
+        ctk.CTkLabel(
+            c3,
+            text="Atrasos curtos (1.5–7 ms) geram Flanger metálico; atrasos maiores (12–30 ms) criam efeito Coro / Voz Dupla.",
+            font=ctk.CTkFont(size=11),
+            text_color="#94a3b8",
+        ).pack(anchor="w", padx=14, pady=(0, 8))
+        self.chorus_rate_var = self._add_slider(c3, "Velocidade LFO", 0.1, 8.0, 1.2, "Hz", step=0.1)
+        self.chorus_delay_var = self._add_slider(c3, "Atraso Base (Flanger ↔ Chorus)", 1.5, 35.0, 14.0, "ms", step=0.5)
+        self.chorus_depth_var = self._add_slider(c3, "Modulação (Depth)", 0.5, 15.0, 4.5, "ms", step=0.5)
+        self.chorus_fb_var = self._add_slider(c3, "Feedback", 0.0, 85.0, 25.0, "%", step=1.0)
+        self.chorus_mix_var = self._add_slider(c3, "Mistura (Mix)", 0.0, 100.0, 50.0, "%", step=1.0)
+
+        # Tremolo (estilo Audacity)
+        c4 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c4.pack(fill="x", padx=10, pady=8)
+        self.trem_en_var = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            c4,
+            text="Tremolo (estilo 'Tremolo' do Audacity)",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            variable=self.trem_en_var,
+            command=self._on_param_change,
+        ).pack(anchor="w", padx=14, pady=(10, 2))
+        trem_row = ctk.CTkFrame(c4, fg_color="transparent")
+        trem_row.pack(fill="x", padx=14, pady=(4, 6))
+        ctk.CTkLabel(trem_row, text="Forma de Onda:", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 10))
+        self.trem_wave_var = ctk.StringVar(value="Senoide")
+        ctk.CTkOptionMenu(
+            trem_row,
+            variable=self.trem_wave_var,
+            values=["Senoide", "Triangular", "Quadrada", "Dente de Serra"],
+            command=lambda _: self._on_param_change(),
+        ).pack(side="left")
+        self.trem_freq_var = self._add_slider(c4, "Frequência", 0.5, 25.0, 6.0, "Hz", step=0.5)
+        self.trem_depth_var = self._add_slider(c4, "Intensidade (Wetness)", 0.0, 100.0, 65.0, "%", step=1.0)
 
     def _build_fx_tab(self, tab):
         scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
@@ -643,7 +778,7 @@ class VoxCraftApp(ctk.CTk):
         self.rev_mix_var = self._add_slider(c2, "Mistura do Reverb", 0.0, 100.0, 30.0, "%", step=1.0)
 
     def _build_mixer_tab(self, tab):
-        box = ctk.CTkFrame(tab, fg_color="#0f172a", corner_radius=10)
+        box = ctk.CTkScrollableFrame(tab, fg_color="#0f172a", corner_radius=10)
         box.pack(fill="both", expand=True, padx=10, pady=8)
 
         ctk.CTkLabel(
@@ -657,7 +792,12 @@ class VoxCraftApp(ctk.CTk):
             ("Compressor de Voz", self.comp_en_var),
             ("Alterar Tom (Pitch Shifter)", self.pitch_en_var),
             ("Frequency Shifter (Hz)", self.fshift_en_var),
+            ("Vocoder (12 Bandas Synth)", self.voc_en_var),
             ("Equalizador (EQ 5 Bandas + Cortes)", self.eq_en_var),
+            ("Phaser (Audacity)", self.phaser_en_var),
+            ("Wahwah (Audacity)", self.wah_en_var),
+            ("Chorus & Flanger", self.chorus_en_var),
+            ("Tremolo (Audacity)", self.trem_en_var),
             ("Modulador em Anel (Robô)", self.ring_en_var),
             ("Distorção & Bitcrusher (Rádio/Lo-Fi)", self.dist_en_var),
             ("Eco / Delay", self.echo_en_var),
@@ -666,11 +806,11 @@ class VoxCraftApp(ctk.CTk):
 
         grid = ctk.CTkFrame(box, fg_color="transparent")
         grid.pack(fill="x", padx=16, pady=6)
+        grid.columnconfigure(0, weight=1)
+        grid.columnconfigure(1, weight=1)
         for idx, (label, var) in enumerate(modules):
             card = ctk.CTkFrame(grid, fg_color="#161f33", corner_radius=8)
             card.grid(row=idx // 2, column=idx % 2, sticky="ew", padx=6, pady=6)
-            grid.columnconfigure(0, weight=1)
-            grid.columnconfigure(1, weight=1)
             ctk.CTkSwitch(
                 card, text=label, variable=var, font=ctk.CTkFont(size=13), command=self._on_param_change
             ).pack(anchor="w", padx=14, pady=12)
@@ -780,6 +920,11 @@ class VoxCraftApp(ctk.CTk):
             freq_shift_enabled=bool(self.fshift_en_var.get()),
             freq_shift_hz=float(self.fshift_hz_var.get()),
             freq_shift_mix=float(self.fshift_mix_var.get()) / 100.0,
+            vocoder_enabled=bool(self.voc_en_var.get()),
+            vocoder_carrier=str(self.voc_carrier_var.get()),
+            vocoder_freq_hz=float(self.voc_freq_var.get()),
+            vocoder_smooth=float(self.voc_smooth_var.get()) / 100.0,
+            vocoder_mix=float(self.voc_mix_var.get()) / 100.0,
             eq_enabled=bool(self.eq_en_var.get()),
             eq_hpf_enabled=bool(self.hpf_en_var.get()),
             eq_hpf_hz=float(self.hpf_hz_var.get()),
@@ -790,6 +935,27 @@ class VoxCraftApp(ctk.CTk):
             eq_band3_db=float(self.eq_b3_var.get()),
             eq_band4_db=float(self.eq_b4_var.get()),
             eq_band5_db=float(self.eq_b5_var.get()),
+            chorus_enabled=bool(self.chorus_en_var.get()),
+            chorus_rate_hz=float(self.chorus_rate_var.get()),
+            chorus_delay_ms=float(self.chorus_delay_var.get()),
+            chorus_depth_ms=float(self.chorus_depth_var.get()),
+            chorus_feedback=float(self.chorus_fb_var.get()) / 100.0,
+            chorus_mix=float(self.chorus_mix_var.get()) / 100.0,
+            phaser_enabled=bool(self.phaser_en_var.get()),
+            phaser_stages=int(round(self.phaser_stages_var.get())),
+            phaser_freq_hz=float(self.phaser_freq_var.get()),
+            phaser_depth=float(self.phaser_depth_var.get()) / 100.0,
+            phaser_feedback=float(self.phaser_fb_var.get()) / 100.0,
+            phaser_mix=float(self.phaser_mix_var.get()) / 100.0,
+            wah_enabled=bool(self.wah_en_var.get()),
+            wah_freq_hz=float(self.wah_freq_var.get()),
+            wah_depth=float(self.wah_depth_var.get()) / 100.0,
+            wah_resonance=float(self.wah_res_var.get()),
+            wah_mix=float(self.wah_mix_var.get()) / 100.0,
+            tremolo_enabled=bool(self.trem_en_var.get()),
+            tremolo_freq_hz=float(self.trem_freq_var.get()),
+            tremolo_waveform=str(self.trem_wave_var.get()),
+            tremolo_depth=float(self.trem_depth_var.get()) / 100.0,
             ring_enabled=bool(self.ring_en_var.get()),
             ring_freq_hz=float(self.ring_freq_var.get()),
             ring_waveform=str(self.ring_wave_var.get()),
@@ -832,6 +998,12 @@ class VoxCraftApp(ctk.CTk):
             self.fshift_hz_var.set(p.freq_shift_hz)
             self.fshift_mix_var.set(p.freq_shift_mix * 100.0)
 
+            self.voc_en_var.set(p.vocoder_enabled)
+            self.voc_carrier_var.set(p.vocoder_carrier)
+            self.voc_freq_var.set(p.vocoder_freq_hz)
+            self.voc_smooth_var.set(p.vocoder_smooth * 100.0)
+            self.voc_mix_var.set(p.vocoder_mix * 100.0)
+
             self.eq_en_var.set(p.eq_enabled)
             self.hpf_en_var.set(p.eq_hpf_enabled)
             self.hpf_hz_var.set(p.eq_hpf_hz)
@@ -842,6 +1014,31 @@ class VoxCraftApp(ctk.CTk):
             self.eq_b3_var.set(p.eq_band3_db)
             self.eq_b4_var.set(p.eq_band4_db)
             self.eq_b5_var.set(p.eq_band5_db)
+
+            self.chorus_en_var.set(p.chorus_enabled)
+            self.chorus_rate_var.set(p.chorus_rate_hz)
+            self.chorus_delay_var.set(p.chorus_delay_ms)
+            self.chorus_depth_var.set(p.chorus_depth_ms)
+            self.chorus_fb_var.set(p.chorus_feedback * 100.0)
+            self.chorus_mix_var.set(p.chorus_mix * 100.0)
+
+            self.phaser_en_var.set(p.phaser_enabled)
+            self.phaser_stages_var.set(p.phaser_stages)
+            self.phaser_freq_var.set(p.phaser_freq_hz)
+            self.phaser_depth_var.set(p.phaser_depth * 100.0)
+            self.phaser_fb_var.set(p.phaser_feedback * 100.0)
+            self.phaser_mix_var.set(p.phaser_mix * 100.0)
+
+            self.wah_en_var.set(p.wah_enabled)
+            self.wah_freq_var.set(p.wah_freq_hz)
+            self.wah_depth_var.set(p.wah_depth * 100.0)
+            self.wah_res_var.set(p.wah_resonance)
+            self.wah_mix_var.set(p.wah_mix * 100.0)
+
+            self.trem_en_var.set(p.tremolo_enabled)
+            self.trem_freq_var.set(p.tremolo_freq_hz)
+            self.trem_wave_var.set(p.tremolo_waveform)
+            self.trem_depth_var.set(p.tremolo_depth * 100.0)
 
             self.ring_en_var.set(p.ring_enabled)
             self.ring_freq_var.set(p.ring_freq_hz)
@@ -868,8 +1065,13 @@ class VoxCraftApp(ctk.CTk):
                 self.input_gain_var, self.output_gain_var, self.gate_thresh_var, self.comp_thresh_var,
                 self.pitch_st_var, self.pitch_cents_var, self.pitch_mix_var,
                 self.fshift_hz_var, self.fshift_mix_var,
+                self.voc_freq_var, self.voc_smooth_var, self.voc_mix_var,
                 self.hpf_hz_var, self.lpf_hz_var,
                 self.eq_b1_var, self.eq_b2_var, self.eq_b3_var, self.eq_b4_var, self.eq_b5_var,
+                self.chorus_rate_var, self.chorus_delay_var, self.chorus_depth_var, self.chorus_fb_var, self.chorus_mix_var,
+                self.phaser_stages_var, self.phaser_freq_var, self.phaser_depth_var, self.phaser_fb_var, self.phaser_mix_var,
+                self.wah_freq_var, self.wah_depth_var, self.wah_res_var, self.wah_mix_var,
+                self.trem_freq_var, self.trem_depth_var,
                 self.ring_freq_var, self.ring_mix_var,
                 self.dist_drive_var, self.dist_bits_var, self.dist_down_var, self.dist_mix_var,
                 self.echo_delay_var, self.echo_fb_var, self.echo_mix_var,

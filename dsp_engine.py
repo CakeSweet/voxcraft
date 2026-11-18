@@ -29,6 +29,13 @@ class DSPParams:
     freq_shift_hz: float = 0.0     # -500.0 a +500.0 Hz
     freq_shift_mix: float = 1.0
 
+    # Vocoder (estilo Audacity - Filtro de 12 Bandas)
+    vocoder_enabled: bool = False
+    vocoder_carrier: str = "Dente de Serra"  # "Dente de Serra", "Acorde", "Quadrada", "Sussurro (Ruído)"
+    vocoder_freq_hz: float = 110.0           # 55 a 300 Hz
+    vocoder_smooth: float = 0.45             # 0.1 a 0.95 (suavidade do envelope)
+    vocoder_mix: float = 0.85
+
     # Equalizador (Filtro + 5 Bandas estilo Audacity)
     eq_enabled: bool = True
     eq_hpf_enabled: bool = True
@@ -41,7 +48,36 @@ class DSPParams:
     eq_band4_db: float = 0.0       # Médio-Agudo (3500 Hz)
     eq_band5_db: float = 0.0       # Agudo / Brilho (7500 Hz)
 
-    # Modulador (Robô / Alien / Tremolo)
+    # Chorus / Flanger (Duplicador de Voz)
+    chorus_enabled: bool = False
+    chorus_rate_hz: float = 1.2    # 0.1 a 8.0 Hz
+    chorus_delay_ms: float = 14.0  # 1.5 a 35.0 ms (<8 ms = Flanger, >=10 ms = Chorus)
+    chorus_depth_ms: float = 4.5   # 0.5 a 15.0 ms
+    chorus_feedback: float = 0.25  # 0.0 a 0.85
+    chorus_mix: float = 0.5
+
+    # Phaser (estilo Audacity)
+    phaser_enabled: bool = False
+    phaser_stages: int = 6         # 2, 4, 6, 8, 10, 12
+    phaser_freq_hz: float = 0.8    # 0.1 a 6.0 Hz
+    phaser_depth: float = 0.7      # 0.0 a 1.0
+    phaser_feedback: float = 0.45  # -0.90 a +0.90
+    phaser_mix: float = 0.6
+
+    # Wahwah (estilo Audacity)
+    wah_enabled: bool = False
+    wah_freq_hz: float = 1.5       # 0.2 a 8.0 Hz
+    wah_depth: float = 0.75        # 0.0 a 1.0
+    wah_resonance: float = 2.8     # 0.5 a 8.0 Q
+    wah_mix: float = 0.75
+
+    # Tremolo (estilo Audacity)
+    tremolo_enabled: bool = False
+    tremolo_freq_hz: float = 6.0   # 0.5 a 25.0 Hz
+    tremolo_waveform: str = "Senoide"  # "Senoide", "Triangular", "Quadrada", "Dente de Serra"
+    tremolo_depth: float = 0.65    # 0.0 a 1.0
+
+    # Modulador em Anel (Robô / Alien)
     ring_enabled: bool = False
     ring_freq_hz: float = 60.0     # 5 a 400 Hz
     ring_waveform: str = "Senoide" # "Senoide", "Quadrada", "Triangular"
@@ -169,7 +205,7 @@ def build_eq_sos(p: DSPParams, fs: float) -> np.ndarray:
 
 
 class RingDelay:
-    """Buffer circular vetorizado para Eco e Filtros Comb/All-pass."""
+    """Buffer circular vetorizado para Eco, Chorus/Flanger e Filtros Comb/All-pass."""
 
     def __init__(self, max_samples: int):
         self.size = int(max_samples)
@@ -181,6 +217,16 @@ class RingDelay:
         start = (self.write_idx - delay) % self.size
         indices = (start + np.arange(length)) % self.size
         return self.buf[indices]
+
+    def read_frac_chunk(self, delays: np.ndarray) -> np.ndarray:
+        """Lê um chunk com atrasos fracionários por amostra (interpolação linear)."""
+        length = len(delays)
+        d = np.clip(delays, 1.0, float(self.size - 2))
+        read_pos = (self.write_idx + np.arange(length, dtype=np.float64) - d) % self.size
+        i0 = np.floor(read_pos).astype(np.int32)
+        i1 = (i0 + 1) % self.size
+        frac = (read_pos - i0).astype(np.float32)
+        return self.buf[i0] * (1.0 - frac) + self.buf[i1] * frac
 
     def write_chunk(self, data: np.ndarray):
         length = len(data)
@@ -241,10 +287,42 @@ class RealTimeDSPEngine:
         self._hilb_delay_len = m
         self._fshift_phase = 0.0
 
+        # Vocoder (12 bandas logarítmicas de 150 Hz a 5500 Hz)
+        edges = np.geomspace(150.0, min(5500.0, sr * 0.44), 13)
+        self._voc_sos = []
+        self._voc_mod_zi = []
+        self._voc_car_zi = []
+        self._voc_env_zi = []
+        for i in range(12):
+            sos = signal.butter(2, [edges[i], edges[i + 1]], btype="bandpass", fs=sr, output="sos")
+            self._voc_sos.append(sos)
+            self._voc_mod_zi.append(np.zeros((sos.shape[0], 2), dtype=np.float64))
+            self._voc_car_zi.append(np.zeros((sos.shape[0], 2), dtype=np.float64))
+            self._voc_env_zi.append(np.zeros(1, dtype=np.float64))
+        self._voc_phase1 = 0.0
+        self._voc_phase2 = 0.0
+        self._voc_phase3 = 0.0
+
         # Equalizador SOS (7 estágios biquad)
         self._eq_sos = build_eq_sos(self.params, sr)
         self._eq_zi = np.zeros((7, 2), dtype=np.float64)
         self._eq_dirty = False
+
+        # Chorus / Flanger
+        self._chorus_ring = RingDelay(int(0.12 * sr))
+        self._chorus_phase = 0.0
+
+        # Phaser (até 12 estágios all-pass de 1ª ordem)
+        self._phaser_phase = 0.0
+        self._phaser_zi = np.zeros((12, 1), dtype=np.float64)
+        self._phaser_fb_sample = 0.0
+
+        # Wahwah (biquad bandpass ressonante)
+        self._wah_phase = 0.0
+        self._wah_zi = np.zeros(2, dtype=np.float64)
+
+        # Tremolo
+        self._trem_phase = 0.0
 
         # Ring Modulator
         self._ring_phase = 0.0
@@ -357,30 +435,54 @@ class RealTimeDSPEngine:
             wet = self._process_freq_shift(x, p.freq_shift_hz)
             x = x * (1.0 - p.freq_shift_mix) + wet * p.freq_shift_mix
 
-        # 6. Equalizador (HPF + 5 Bandas + LPF)
+        # 6. Vocoder (estilo Audacity)
+        if p.vocoder_enabled and p.vocoder_mix > 0.01:
+            wet = self._process_vocoder(x, p.vocoder_carrier, p.vocoder_freq_hz, p.vocoder_smooth)
+            x = x * (1.0 - p.vocoder_mix) + wet * p.vocoder_mix
+
+        # 7. Equalizador (HPF + 5 Bandas + LPF)
         if p.eq_enabled:
             y_eq, self._eq_zi = signal.sosfilt(self._eq_sos, x, zi=self._eq_zi)
             x = y_eq.astype(np.float32)
 
-        # 7. Modulador em Anel (Robô / Alien)
+        # 8. Wahwah (estilo Audacity)
+        if p.wah_enabled and p.wah_mix > 0.01:
+            wet = self._process_wah(x, p.wah_freq_hz, p.wah_depth, p.wah_resonance)
+            x = x * (1.0 - p.wah_mix) + wet * p.wah_mix
+
+        # 9. Phaser (estilo Audacity)
+        if p.phaser_enabled and p.phaser_mix > 0.01:
+            wet = self._process_phaser(x, p.phaser_stages, p.phaser_freq_hz, p.phaser_depth, p.phaser_feedback)
+            x = x * (1.0 - p.phaser_mix) + wet * p.phaser_mix
+
+        # 10. Chorus / Flanger
+        if p.chorus_enabled and p.chorus_mix > 0.01:
+            wet = self._process_chorus(x, p.chorus_rate_hz, p.chorus_delay_ms, p.chorus_depth_ms, p.chorus_feedback)
+            x = x * (1.0 - p.chorus_mix) + wet * p.chorus_mix
+
+        # 11. Modulador em Anel (Robô / Alien)
         if p.ring_enabled and p.ring_mix > 0.01:
             wet = self._process_ring_mod(x, p.ring_freq_hz, p.ring_waveform)
             x = x * (1.0 - p.ring_mix) + wet * p.ring_mix
 
-        # 8. Distorção & Bitcrusher (Rádio / Mega-fone)
+        # 12. Tremolo (estilo Audacity)
+        if p.tremolo_enabled and p.tremolo_depth > 0.01:
+            x = self._process_tremolo(x, p.tremolo_freq_hz, p.tremolo_waveform, p.tremolo_depth)
+
+        # 13. Distorção & Bitcrusher (Rádio / Mega-fone)
         if p.dist_enabled and p.dist_mix > 0.01:
             wet = self._process_distortion(x, p.dist_drive, p.dist_bits, p.dist_downsample)
             x = x * (1.0 - p.dist_mix) + wet * p.dist_mix
 
-        # 9. Eco / Delay
+        # 14. Eco / Delay
         if p.echo_enabled and p.echo_mix > 0.01:
             x = self._process_echo(x, p.echo_delay_ms, p.echo_feedback, p.echo_mix)
 
-        # 10. Reverb
+        # 15. Reverb
         if p.reverb_enabled and p.reverb_mix > 0.01:
             x = self._process_reverb(x, p.reverb_room, p.reverb_damp, p.reverb_mix)
 
-        # 11. Ganho de Saída + Soft Limiter (evita clipping no Discord)
+        # 16. Ganho de Saída + Soft Limiter (evita clipping no Discord)
         if abs(p.output_gain_db) > 0.05:
             x *= 10.0 ** (p.output_gain_db / 20.0)
         x = np.tanh(x * 0.92).astype(np.float32) * 0.98
@@ -450,6 +552,158 @@ class RealTimeDSPEngine:
 
         out = x_del * np.cos(phases) - x_hilb * np.sin(phases)
         return out.astype(np.float32)
+
+    def _process_vocoder(self, x: np.ndarray, carrier_type: str, freq_hz: float, smooth: float) -> np.ndarray:
+        n = len(x)
+        f1 = max(40.0, float(freq_hz))
+        d1 = f1 / self.sr
+        p1 = (self._voc_phase1 + np.arange(n, dtype=np.float64) * d1) % 1.0
+        self._voc_phase1 = float((self._voc_phase1 + n * d1) % 1.0)
+
+        if carrier_type == "Quadrada":
+            car = np.where(p1 < 0.5, 0.7, -0.7).astype(np.float32)
+        elif carrier_type == "Acorde":
+            d2 = (f1 * 1.25) / self.sr
+            d3 = (f1 * 1.50) / self.sr
+            p2 = (self._voc_phase2 + np.arange(n, dtype=np.float64) * d2) % 1.0
+            p3 = (self._voc_phase3 + np.arange(n, dtype=np.float64) * d3) % 1.0
+            self._voc_phase2 = float((self._voc_phase2 + n * d2) % 1.0)
+            self._voc_phase3 = float((self._voc_phase3 + n * d3) % 1.0)
+            car = (0.35 * ((2.0 * p1 - 1.0) + (2.0 * p2 - 1.0) + (2.0 * p3 - 1.0))).astype(np.float32)
+        elif carrier_type == "Sussurro (Ruído)":
+            car = np.random.uniform(-0.85, 0.85, n).astype(np.float32)
+        else:
+            # Dente de Serra
+            car = (2.0 * p1 - 1.0).astype(np.float32)
+
+        # Filtro passa-baixa de envelope (suavidade)
+        env_fc = 8.0 + (1.0 - float(np.clip(smooth, 0.05, 0.95))) * 55.0
+        env_b, env_a = self._onepole_lp(env_fc, self.sr)
+
+        out = np.zeros(n, dtype=np.float64)
+        for i in range(12):
+            sos = self._voc_sos[i]
+            v_band, self._voc_mod_zi[i] = signal.sosfilt(sos, x, zi=self._voc_mod_zi[i])
+            env, self._voc_env_zi[i] = signal.lfilter(env_b, env_a, np.abs(v_band), zi=self._voc_env_zi[i])
+            c_band, self._voc_car_zi[i] = signal.sosfilt(sos, car, zi=self._voc_car_zi[i])
+            out += c_band * env
+
+        return np.tanh(out * 3.8).astype(np.float32)
+
+    def _process_chorus(
+        self, x: np.ndarray, rate_hz: float, delay_ms: float, depth_ms: float, feedback: float
+    ) -> np.ndarray:
+        n = len(x)
+        base_s = max(48.0, float(delay_ms) * 0.001 * self.sr)
+        depth_s = max(1.0, float(depth_ms) * 0.001 * self.sr)
+        fb = float(np.clip(feedback, 0.0, 0.85))
+        min_safe = max(16, int(max(1.0, base_s - depth_s * 0.5)))
+
+        out = np.empty(n, dtype=np.float32)
+        dphi = float(rate_hz) / self.sr
+        pos = 0
+        while pos < n:
+            clen = min(n - pos, min_safe)
+            xc = x[pos:pos + clen]
+            phases = (self._chorus_phase + np.arange(clen, dtype=np.float64) * dphi) % 1.0
+            self._chorus_phase = float((self._chorus_phase + clen * dphi) % 1.0)
+
+            lfo = 0.5 * (1.0 + np.sin(2.0 * np.pi * phases))
+            delays = base_s + depth_s * lfo
+            delayed = self._chorus_ring.read_frac_chunk(delays)
+            self._chorus_ring.write_chunk(xc + fb * delayed)
+            out[pos:pos + clen] = delayed
+            pos += clen
+
+        return out
+
+    def _process_phaser(
+        self, x: np.ndarray, stages: int, freq_hz: float, depth: float, feedback: float
+    ) -> np.ndarray:
+        n = len(x)
+        n_stages = int(np.clip(stages, 2, 12))
+        if n_stages % 2 != 0:
+            n_stages += 1
+        fb = float(np.clip(feedback, -0.90, 0.90))
+        d = float(np.clip(depth, 0.0, 1.0))
+
+        chunk_sz = 32
+        out = np.empty(n, dtype=np.float32)
+        dphi = float(freq_hz) / self.sr
+
+        pos = 0
+        while pos < n:
+            clen = min(n - pos, chunk_sz)
+            xc = x[pos:pos + clen].astype(np.float64)
+            # LFO no meio do sub-bloco
+            lfo = 0.5 * (1.0 + np.sin(2.0 * np.pi * self._phaser_phase))
+            self._phaser_phase = float((self._phaser_phase + clen * dphi) % 1.0)
+
+            fc = 140.0 * (22.0 ** (lfo * d))
+            fc = min(fc, self.sr * 0.42)
+            t = np.tan(np.pi * fc / self.sr)
+            a = (1.0 - t) / (1.0 + t)
+            b_ap = np.array([a, 1.0], dtype=np.float64)
+            a_ap = np.array([1.0, a], dtype=np.float64)
+
+            y = xc + fb * self._phaser_fb_sample
+            for s in range(n_stages):
+                y, self._phaser_zi[s] = signal.lfilter(b_ap, a_ap, y, zi=self._phaser_zi[s])
+
+            self._phaser_fb_sample = float(np.tanh(y[-1]))
+            out[pos:pos + clen] = (0.5 * xc + 0.5 * y).astype(np.float32)
+            pos += clen
+
+        return out
+
+    def _process_wah(self, x: np.ndarray, freq_hz: float, depth: float, resonance: float) -> np.ndarray:
+        n = len(x)
+        d = float(np.clip(depth, 0.0, 1.0))
+        q = float(np.clip(resonance, 0.5, 8.0))
+        chunk_sz = 32
+        out = np.empty(n, dtype=np.float32)
+        dphi = float(freq_hz) / self.sr
+
+        pos = 0
+        while pos < n:
+            clen = min(n - pos, chunk_sz)
+            xc = x[pos:pos + clen].astype(np.float64)
+            lfo = 0.5 * (1.0 + np.sin(2.0 * np.pi * self._wah_phase))
+            self._wah_phase = float((self._wah_phase + clen * dphi) % 1.0)
+
+            fc = 320.0 * (8.5 ** (lfo * d))
+            fc = min(fc, self.sr * 0.44)
+            w0 = 2.0 * np.pi * fc / self.sr
+            alpha = np.sin(w0) / (2.0 * q)
+            cos_w0 = np.cos(w0)
+            a0 = 1.0 + alpha
+            b_wah = np.array([alpha / a0, 0.0, -alpha / a0], dtype=np.float64) * 2.2
+            a_wah = np.array([1.0, (-2.0 * cos_w0) / a0, (1.0 - alpha) / a0], dtype=np.float64)
+
+            yw, self._wah_zi = signal.lfilter(b_wah, a_wah, xc, zi=self._wah_zi)
+            out[pos:pos + clen] = yw.astype(np.float32)
+            pos += clen
+
+        return out
+
+    def _process_tremolo(self, x: np.ndarray, freq_hz: float, waveform: str, depth: float) -> np.ndarray:
+        n = len(x)
+        dphi = float(freq_hz) / self.sr
+        phases = (self._trem_phase + np.arange(n, dtype=np.float64) * dphi) % 1.0
+        self._trem_phase = float((self._trem_phase + n * dphi) % 1.0)
+
+        if waveform == "Quadrada":
+            lfo = np.where(phases < 0.5, 1.0, 0.0)
+        elif waveform == "Triangular":
+            lfo = 1.0 - 2.0 * np.abs(phases - 0.5)
+        elif waveform == "Dente de Serra":
+            lfo = phases
+        else:
+            lfo = 0.5 * (1.0 + np.sin(2.0 * np.pi * phases))
+
+        d = float(np.clip(depth, 0.0, 1.0))
+        env = (1.0 - d * (1.0 - lfo)).astype(np.float32)
+        return x * env
 
     def _process_ring_mod(self, x: np.ndarray, freq_hz: float, waveform: str) -> np.ndarray:
         n = len(x)
@@ -523,7 +777,6 @@ class RealTimeDSPEngine:
             comb_sum = np.zeros(clen, dtype=np.float32)
             for idx, (ring, delay) in enumerate(zip(self._comb_rings, self._comb_delays)):
                 del_sig = ring.read_chunk(delay, clen)
-                # Suavização simples por bloco + passa-baixa leve
                 lp_b = np.array([1.0 - d], dtype=np.float64)
                 lp_a = np.array([1.0, -d], dtype=np.float64)
                 zi = np.array([self._comb_lp_state[idx]], dtype=np.float64)
