@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ctypes
 from dataclasses import asdict
 import io
@@ -16,6 +18,8 @@ from tkinter import filedialog, messagebox, simpledialog
 import urllib.request
 import zipfile
 
+import customtkinter as ctk
+
 GITHUB_REPO = "CakeSweet/voxcraft_studio"
 APP_VERSION = "2.1.0"
 
@@ -25,6 +29,85 @@ ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", BASE_DIR), "assets")
 ICON_ICO_PATH = os.path.join(ASSETS_DIR, "voxcraft.ico")
 ICON_PNG_PATH = os.path.join(ASSETS_DIR, "voxcraft.png")
 
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+# Módulos pesados carregados em segundo plano durante a tela de carregamento suave
+np = None
+signal = None
+Image = None
+ImageDraw = None
+ImageTk = None
+pystray = None
+pynput_kb = None
+DSPParams = None
+RealTimeDSPEngine = None
+build_eq_sos = None
+get_builtin_presets = None
+load_app_config = None
+load_user_presets = None
+save_app_config = None
+save_user_presets = None
+AudioDeviceItem = None
+AudioRouter = None
+_MODULES_LOADED = False
+
+
+def _load_runtime_modules():
+    global np, signal, Image, ImageDraw, ImageTk, pystray, pynput_kb
+    global DSPParams, RealTimeDSPEngine, build_eq_sos
+    global get_builtin_presets, load_app_config, load_user_presets, save_app_config, save_user_presets
+    global AudioDeviceItem, AudioRouter, _MODULES_LOADED
+
+    if _MODULES_LOADED:
+        return
+
+    import numpy as _np
+    from scipy import signal as _signal
+
+    np = _np
+    signal = _signal
+
+    try:
+        from PIL import Image as _Image, ImageDraw as _ImageDraw, ImageTk as _ImageTk
+        Image, ImageDraw, ImageTk = _Image, _ImageDraw, _ImageTk
+    except ImportError:
+        Image = ImageDraw = ImageTk = None
+
+    try:
+        import pystray as _pystray
+        pystray = _pystray
+    except ImportError:
+        pystray = None
+
+    try:
+        from pynput import keyboard as _pynput_kb
+        pynput_kb = _pynput_kb
+    except ImportError:
+        pynput_kb = None
+
+    from dsp_engine import DSPParams as _DSPParams, RealTimeDSPEngine as _RealTimeDSPEngine, build_eq_sos as _build_eq_sos
+    from presets import (
+        get_builtin_presets as _get_builtin_presets,
+        load_app_config as _load_app_config,
+        load_user_presets as _load_user_presets,
+        save_app_config as _save_app_config,
+        save_user_presets as _save_user_presets,
+    )
+    from audio_router import AudioDeviceItem as _AudioDeviceItem, AudioRouter as _AudioRouter
+
+    DSPParams = _DSPParams
+    RealTimeDSPEngine = _RealTimeDSPEngine
+    build_eq_sos = _build_eq_sos
+    get_builtin_presets = _get_builtin_presets
+    load_app_config = _load_app_config
+    load_user_presets = _load_user_presets
+    save_app_config = _save_app_config
+    save_user_presets = _save_user_presets
+    AudioDeviceItem = _AudioDeviceItem
+    AudioRouter = _AudioRouter
+    _MODULES_LOADED = True
+
 
 def _enable_windows_taskbar_icon_id():
     if sys.platform == "win32":
@@ -32,137 +115,6 @@ def _enable_windows_taskbar_icon_id():
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("CakeSweet.VoxCraftStudio.1")
         except Exception:
             pass
-
-
-class _EarlySplash:
-    """Tela de carregamento instantânea exibida antes dos imports pesados (NumPy/SciPy/CTk)."""
-
-    def __init__(self):
-        self.root = None
-        self._bar = None
-        self._lbl = None
-        self._icon_img = None
-        try:
-            _enable_windows_taskbar_icon_id()
-            r = tk.Tk()
-            r.overrideredirect(True)
-            r.configure(bg="#0b1120")
-            r.attributes("-topmost", True)
-            w, h = 420, 185
-            sw = r.winfo_screenwidth()
-            sh = r.winfo_screenheight()
-            r.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
-
-            frame = tk.Frame(r, bg="#0f172a", highlightbackground="#1e293b", highlightthickness=2)
-            frame.pack(fill="both", expand=True)
-
-            hdr = tk.Frame(frame, bg="#0f172a")
-            hdr.pack(pady=(22, 6))
-            if os.path.exists(ICON_PNG_PATH):
-                try:
-                    raw_ico = tk.PhotoImage(file=ICON_PNG_PATH)
-                    factor = max(1, raw_ico.width() // 44)
-                    self._icon_img = raw_ico.subsample(factor, factor)
-                    tk.Label(hdr, image=self._icon_img, bg="#0f172a").pack(side="left", padx=(0, 10))
-                except Exception:
-                    pass
-
-            titles = tk.Frame(hdr, bg="#0f172a")
-            titles.pack(side="left")
-            tk.Label(
-                titles, text="VoxCraft Studio", font=("Segoe UI", 18, "bold"), fg="#4cc9f0", bg="#0f172a"
-            ).pack(anchor="w")
-            tk.Label(
-                titles,
-                text=f"Modulador de Voz em Tempo Real • v{APP_VERSION}",
-                font=("Segoe UI", 9.5),
-                fg="#94a3b8",
-                bg="#0f172a",
-            ).pack(anchor="w")
-
-            self._lbl = tk.Label(
-                frame,
-                text="Inicializando...",
-                font=("Segoe UI", 10),
-                fg="#cbd5e1",
-                bg="#0f172a",
-            )
-            self._lbl.pack(pady=(12, 8))
-
-            bar_bg = tk.Canvas(frame, width=340, height=8, bg="#1e293b", highlightthickness=0)
-            bar_bg.pack()
-            self._bar = bar_bg
-            self._fill = bar_bg.create_rectangle(0, 0, 40, 8, fill="#38bdf8", width=0)
-            self.root = r
-            r.update()
-        except Exception:
-            self.root = None
-
-    def set_progress(self, frac: float, text: str):
-        if self.root is None:
-            return
-        try:
-            self._lbl.configure(text=text)
-            px = max(12, min(340, int(340 * frac)))
-            self._bar.coords(self._fill, 0, 0, px, 8)
-            self.root.update()
-        except Exception:
-            pass
-
-    def close(self):
-        if self.root is not None:
-            try:
-                self.root.destroy()
-            except Exception:
-                pass
-            self.root = None
-
-
-_early_splash = _EarlySplash() if __name__ == "__main__" else None
-if _early_splash is not None:
-    _early_splash.set_progress(0.18, "Carregando motor de áudio (NumPy / SciPy)...")
-
-import customtkinter as ctk
-import numpy as np
-from scipy import signal
-
-if _early_splash is not None:
-    _early_splash.set_progress(0.38, "Carregando interface e periféricos...")
-
-try:
-    from PIL import Image, ImageDraw, ImageTk
-except ImportError:
-    Image = None
-    ImageDraw = None
-    ImageTk = None
-
-try:
-    import pystray
-except ImportError:
-    pystray = None
-
-try:
-    from pynput import keyboard as pynput_kb
-except ImportError:
-    pynput_kb = None
-
-from dsp_engine import DSPParams, RealTimeDSPEngine, build_eq_sos
-from presets import (
-    get_builtin_presets,
-    load_app_config,
-    load_user_presets,
-    save_app_config,
-    save_user_presets,
-)
-from audio_router import AudioDeviceItem, AudioRouter
-
-if _early_splash is not None:
-    _early_splash.set_progress(0.54, "Preparando janela principal...")
-    _early_splash.close()
-    _early_splash = None
-
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
 
 
 def _load_or_create_pil_icon():
@@ -188,15 +140,13 @@ class VoxCraftApp(ctk.CTk):
     def __init__(self):
         _enable_windows_taskbar_icon_id()
         super().__init__()
-        self.withdraw()
-        self.title("VoxCraft Studio — Modulador de Voz em Tempo Real (Estilo Audacity)")
-        self.geometry("1220x780")
-        self.minsize(1060, 680)
 
         self._window_icon_photo = None
+        self._splash_icon_photo = None
         self._tray_icon = None
         self._tray_thread = None
         self._is_quitting = False
+        self._is_loaded = False
 
         # Cache de estado da UI para evitar redesenhos desnecessários e travamentos ao restaurar/maximizar
         self._last_in_norm = -1.0
@@ -207,135 +157,241 @@ class VoxCraftApp(ctk.CTk):
         self._eq_redraw_job = None
         self._last_eq_sig = None
 
-        splash_win, splash_lbl, splash_bar = self._create_loading_overlay()
-        self._update_loading_overlay(splash_win, splash_lbl, splash_bar, 0.62, "Montando controles e abas de efeitos...")
-
+        # Abre imediatamente em modo Tela de Carregamento (janela única, 60 FPS suave, sem travar)
+        self.title("VoxCraft Studio — Carregando...")
+        self.configure(fg_color="#0b1120")
+        sw_w, sw_h = 480, 235
+        scr_w = self.winfo_screenwidth()
+        scr_h = self.winfo_screenheight()
+        self.geometry(f"{sw_w}x{sw_h}+{(scr_w - sw_w) // 2}+{(scr_h - sw_h) // 2}")
+        self.resizable(False, False)
         self._apply_window_icon()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self.dsp = RealTimeDSPEngine(48000.0)
-        self.router = AudioRouter(self.dsp)
-        self.params = DSPParams()
+        self._splash_disp = 0.05
+        self._splash_target = 0.55
+        self._splash_phase = 0.0
+        self._splash_anim_job = None
+        self._import_done = False
+        self._import_error: str | None = None
 
-        self.builtin_presets = get_builtin_presets()
-        self.user_presets = load_user_presets()
-        self.app_config = load_app_config()
+        self._build_splash_ui()
+        self._animate_splash()
+        self.after(30, self._start_async_boot)
 
-        self.in_devices: list[AudioDeviceItem] = []
-        self.out_devices: list[AudioDeviceItem] = []
-        self._syncing_ui = False
+    def _build_splash_ui(self):
+        self._splash_frame = ctk.CTkFrame(
+            self, fg_color="#0f172a", border_width=1, border_color="#1e293b", corner_radius=14
+        )
+        self._splash_frame.pack(fill="both", expand=True, padx=14, pady=14)
 
-        # Atalho Global (Efeito <-> Voz Normal)
-        self.hotkey_spec: str = "f9"
-        self._hotkey_lock = threading.Lock()
-        self._pressed_keys: set[str] = set()
-        self._hotkey_is_down = False
-        self._hold_base_bypass: bool | None = None
-        self._capturing_hotkey = False
-        self._capture_mods: set[str] = set()
-        self._kb_listener = None
-        self._win32_stop_event = threading.Event()
-        self._win32_thread = None
-        self._hotkey_enabled_cached: bool = True
-        self._hotkey_hold_cached: bool = False
+        hdr = ctk.CTkFrame(self._splash_frame, fg_color="transparent")
+        hdr.pack(pady=(26, 8))
 
-        self._build_layout()
-        self._update_loading_overlay(splash_win, splash_lbl, splash_bar, 0.80, "Carregando dispositivos de áudio...")
-        self._restore_saved_ui_prefs()
-        self._refresh_devices(reinit_backend=False, initial_load=True)
+        if os.path.exists(ICON_PNG_PATH):
+            try:
+                raw_ico = tk.PhotoImage(file=ICON_PNG_PATH)
+                factor = max(1, raw_ico.width() // 52)
+                self._splash_icon_photo = raw_ico.subsample(factor, factor)
+                tk.Label(hdr, image=self._splash_icon_photo, bg="#0f172a").pack(side="left", padx=(0, 12))
+            except Exception:
+                pass
 
-        self._update_loading_overlay(splash_win, splash_lbl, splash_bar, 0.94, "Aplicando voz e preferências...")
-        saved_preset = self.app_config.get("last_preset", "Normal (Limpo + Gate)")
-        if saved_preset in self.builtin_presets:
-            self.preset_var.set(saved_preset)
-            self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True)
-        elif saved_preset in self.user_presets:
-            self.preset_var.set(f"★ {saved_preset}")
-            self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True)
-        else:
-            self.preset_var.set("Normal (Limpo + Gate)")
-            self._apply_preset("Normal (Limpo + Gate)", save_cfg=False, preserve_bypass=True)
+        titles = ctk.CTkFrame(hdr, fg_color="transparent")
+        titles.pack(side="left")
+        ctk.CTkLabel(
+            titles, text="VoxCraft Studio", font=ctk.CTkFont(size=22, weight="bold"), text_color="#4cc9f0"
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            titles,
+            text=f"Modulador de Voz em Tempo Real • v{APP_VERSION}",
+            font=ctk.CTkFont(size=11.5),
+            text_color="#94a3b8",
+        ).pack(anchor="w")
 
-        if self.app_config.pop("pending_update_restore", False):
-            raw_params = self.app_config.pop("current_params", None)
-            was_running_upd = bool(self.app_config.pop("was_running_before_update", False))
-            if isinstance(raw_params, dict):
-                valid_fields = set(asdict(DSPParams()).keys())
-                filtered = {k: v for k, v in raw_params.items() if k in valid_fields}
-                try:
-                    self._load_params_to_ui(DSPParams(**filtered), preserve_bypass=False)
-                except Exception:
-                    pass
-            self._save_config()
-            self.status_lbl.configure(
-                text="Aplicação atualizada! Entradas, saídas e ajustes restaurados.",
-                text_color="#10b981",
-            )
-            if was_running_upd:
-                self.after(450, self._start_audio)
+        self._splash_lbl = ctk.CTkLabel(
+            self._splash_frame,
+            text="Carregando motor de áudio (NumPy / SciPy)...",
+            font=ctk.CTkFont(size=12.5),
+            text_color="#cbd5e1",
+        )
+        self._splash_lbl.pack(pady=(14, 10))
 
+        self._splash_canvas = tk.Canvas(
+            self._splash_frame, width=360, height=10, bg="#1e293b", highlightthickness=0
+        )
+        self._splash_canvas.pack()
+
+    def _animate_splash(self):
+        if self._is_quitting or self._is_loaded:
+            return
+        try:
+            if not self._splash_frame.winfo_exists():
+                return
+            self._splash_disp += (self._splash_target - self._splash_disp) * 0.14
+            self._splash_phase = (self._splash_phase + 0.06) % 1.0
+            c = self._splash_canvas
+            w = 360
+            fill_w = max(12, min(w, int(w * self._splash_disp)))
+            c.delete("all")
+            c.create_rectangle(0, 0, fill_w, 10, fill="#2563eb", width=0)
+            c.create_rectangle(0, 0, max(8, fill_w - 2), 6, fill="#38bdf8", width=0)
+            # Brilho suave percorrendo a barra durante o carregamento
+            if fill_w > 48:
+                hx = int(self._splash_phase * (fill_w + 50)) - 40
+                x0 = max(0, hx)
+                x1 = min(fill_w, hx + 44)
+                if x1 > x0:
+                    c.create_rectangle(x0, 0, x1, 10, fill="#7dd3fc", width=0)
+        except Exception:
+            return
+        self._splash_anim_job = self.after(16, self._animate_splash)
+
+    def _start_async_boot(self):
+        def _worker():
+            try:
+                _load_runtime_modules()
+            except Exception as exc:
+                self._import_error = str(exc)
+            finally:
+                self._import_done = True
+
+        threading.Thread(target=_worker, daemon=True).start()
+        self.after(25, self._poll_boot_imports)
+
+    def _poll_boot_imports(self):
+        if self._is_quitting:
+            return
+        if not self._import_done:
+            self.after(25, self._poll_boot_imports)
+            return
+        if self._import_error:
+            messagebox.showerror("Erro ao Iniciar", f"Falha ao carregar dependências de áudio:\n{self._import_error}")
+            self._quit_app()
+            return
+        self._splash_target = 0.78
+        self._splash_lbl.configure(text="Montando controles e efeitos...")
+        self.after(20, self._boot_step_build_ui)
+
+    def _boot_step_build_ui(self):
+        if self._is_quitting:
+            return
+        try:
+            self.dsp = RealTimeDSPEngine(48000.0)
+            self.router = AudioRouter(self.dsp)
+            self.params = DSPParams()
+
+            self.builtin_presets = get_builtin_presets()
+            self.user_presets = load_user_presets()
+            self.app_config = load_app_config()
+
+            self.in_devices: list[AudioDeviceItem] = []
+            self.out_devices: list[AudioDeviceItem] = []
+            self._syncing_ui = False
+
+            # Atalho Global (Efeito <-> Voz Normal)
+            self.hotkey_spec: str = "f9"
+            self._hotkey_lock = threading.Lock()
+            self._pressed_keys: set[str] = set()
+            self._hotkey_is_down = False
+            self._hold_base_bypass: bool | None = None
+            self._capturing_hotkey = False
+            self._capture_mods: set[str] = set()
+            self._kb_listener = None
+            self._win32_stop_event = threading.Event()
+            self._win32_thread = None
+            self._hotkey_enabled_cached: bool = True
+            self._hotkey_hold_cached: bool = False
+
+            self.main_container = ctk.CTkFrame(self, fg_color="transparent")
+            self._build_layout()
+        except Exception as exc:
+            messagebox.showerror("Erro ao Iniciar", f"Falha ao construir interface:\n{exc}")
+            self._quit_app()
+            return
+
+        self._splash_target = 0.94
+        self._splash_lbl.configure(text="Listando microfones e dispositivos...")
+        self.after(20, self._boot_step_devices)
+
+    def _boot_step_devices(self):
+        if self._is_quitting:
+            return
+        try:
+            self._restore_saved_ui_prefs()
+            self._refresh_devices(reinit_backend=False, initial_load=True)
+
+            saved_preset = self.app_config.get("last_preset", "Normal (Limpo + Gate)")
+            if saved_preset in self.builtin_presets:
+                self.preset_var.set(saved_preset)
+                self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True)
+            elif saved_preset in self.user_presets:
+                self.preset_var.set(f"★ {saved_preset}")
+                self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True)
+            else:
+                self.preset_var.set("Normal (Limpo + Gate)")
+                self._apply_preset("Normal (Limpo + Gate)", save_cfg=False, preserve_bypass=True)
+
+            if self.app_config.pop("pending_update_restore", False):
+                raw_params = self.app_config.pop("current_params", None)
+                was_running_upd = bool(self.app_config.pop("was_running_before_update", False))
+                if isinstance(raw_params, dict):
+                    valid_fields = set(asdict(DSPParams()).keys())
+                    filtered = {k: v for k, v in raw_params.items() if k in valid_fields}
+                    try:
+                        self._load_params_to_ui(DSPParams(**filtered), preserve_bypass=False)
+                    except Exception:
+                        pass
+                self._save_config()
+                self.status_lbl.configure(
+                    text="Aplicação atualizada! Entradas, saídas e ajustes restaurados.",
+                    text_color="#10b981",
+                )
+                if was_running_upd:
+                    self.after(450, self._start_audio)
+        except Exception as exc:
+            messagebox.showerror("Erro ao Iniciar", f"Falha ao inicializar dispositivos:\n{exc}")
+            self._quit_app()
+            return
+
+        self._splash_target = 1.0
+        self._splash_lbl.configure(text="Pronto!")
+        self.after(140, self._finish_splash_transition)
+
+    def _finish_splash_transition(self):
+        if self._is_quitting:
+            return
+        self._is_loaded = True
+        if self._splash_anim_job is not None:
+            try:
+                self.after_cancel(self._splash_anim_job)
+            except Exception:
+                pass
+            self._splash_anim_job = None
+
+        try:
+            self._splash_frame.destroy()
+        except Exception:
+            pass
+
+        self.title("VoxCraft Studio — Modulador de Voz em Tempo Real (Estilo Audacity)")
+        self.configure(fg_color=("#ebebeb", "#1a1a1a"))
+        w, h = 1220, 780
+        scr_w = self.winfo_screenwidth()
+        scr_h = self.winfo_screenheight()
+        x = max(0, (scr_w - w) // 2)
+        y = max(0, (scr_h - h) // 2)
+        self.resizable(True, True)
+        self.minsize(1060, 680)
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+        self.main_container.pack(fill="both", expand=True)
+        self.update_idletasks()
+        self._apply_window_icon()
         self._start_tray_icon()
         self._start_hotkey_listener()
         self.bind("<Map>", self._on_window_map)
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
-
-        self.update_idletasks()
-        if splash_win is not None:
-            try:
-                splash_win.destroy()
-            except Exception:
-                pass
-        self.deiconify()
-        self.lift()
-        self.after(150, self._apply_window_icon)
         self._schedule_ui_loop()
-
-    def _create_loading_overlay(self):
-        try:
-            sw_win = ctk.CTkToplevel(self)
-            sw_win.overrideredirect(True)
-            sw_win.configure(fg_color="#0f172a")
-            sw_win.attributes("-topmost", True)
-            w, h = 420, 185
-            scr_w = sw_win.winfo_screenwidth()
-            scr_h = sw_win.winfo_screenheight()
-            sw_win.geometry(f"{w}x{h}+{(scr_w - w) // 2}+{(scr_h - h) // 2}")
-
-            box = ctk.CTkFrame(sw_win, fg_color="#0f172a", border_width=2, border_color="#1e293b", corner_radius=8)
-            box.pack(fill="both", expand=True)
-
-            ctk.CTkLabel(
-                box, text="VoxCraft Studio", font=ctk.CTkFont(size=20, weight="bold"), text_color="#4cc9f0"
-            ).pack(pady=(26, 2))
-            ctk.CTkLabel(
-                box,
-                text=f"Modulador de Voz em Tempo Real • v{APP_VERSION}",
-                font=ctk.CTkFont(size=11.5),
-                text_color="#94a3b8",
-            ).pack()
-
-            lbl = ctk.CTkLabel(
-                box, text="Preparando interface...", font=ctk.CTkFont(size=12), text_color="#cbd5e1"
-            )
-            lbl.pack(pady=(16, 10))
-
-            bar = ctk.CTkProgressBar(box, width=340, height=8, progress_color="#38bdf8", fg_color="#1e293b")
-            bar.set(0.58)
-            bar.pack()
-            sw_win.update()
-            return sw_win, lbl, bar
-        except Exception:
-            return None, None, None
-
-    @staticmethod
-    def _update_loading_overlay(sw_win, lbl, bar, frac: float, text: str):
-        if sw_win is None:
-            return
-        try:
-            lbl.configure(text=text)
-            bar.set(frac)
-            sw_win.update()
-        except Exception:
-            pass
 
     def _on_window_map(self, _event=None):
         self._last_ui_hidden = False
@@ -355,6 +411,13 @@ class VoxCraftApp(ctk.CTk):
         if pil_img is not None and ImageTk is not None:
             try:
                 self._window_icon_photo = ImageTk.PhotoImage(pil_img)
+                self.iconphoto(True, self._window_icon_photo)
+                return
+            except Exception:
+                pass
+        if os.path.exists(ICON_PNG_PATH):
+            try:
+                self._window_icon_photo = tk.PhotoImage(file=ICON_PNG_PATH)
                 self.iconphoto(True, self._window_icon_photo)
             except Exception:
                 pass
@@ -426,8 +489,9 @@ class VoxCraftApp(ctk.CTk):
     # Construção da Interface
     # ------------------------------------------------------------------ #
     def _build_layout(self):
+        root = getattr(self, "main_container", self)
         # Barra Superior
-        topbar = ctk.CTkFrame(self, height=64, corner_radius=10, fg_color="#161b24")
+        topbar = ctk.CTkFrame(root, height=64, corner_radius=10, fg_color="#161b24")
         topbar.pack(fill="x", padx=12, pady=(10, 6))
         topbar.pack_propagate(False)
 
@@ -509,7 +573,7 @@ class VoxCraftApp(ctk.CTk):
         self.power_btn.pack(side="left", padx=4)
 
         # Corpo Principal: Sidebar (Esquerda) + Workbench (Direita)
-        body = ctk.CTkFrame(self, fg_color="transparent")
+        body = ctk.CTkFrame(root, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=12, pady=(2, 10))
 
         self._build_sidebar(body)
@@ -2736,16 +2800,39 @@ class VoxCraftApp(ctk.CTk):
             self._set_bypass_state(base)
 
     def _on_close(self):
-        if not self._is_quitting and self.minimize_to_tray_var.get() and self._tray_icon is not None:
+        if (
+            self._is_loaded
+            and not self._is_quitting
+            and hasattr(self, "minimize_to_tray_var")
+            and self.minimize_to_tray_var.get()
+            and self._tray_icon is not None
+        ):
             self._minimize_to_tray()
             return
         self._quit_app()
 
     def _quit_app(self):
         self._is_quitting = True
-        self._stop_hotkey_listener()
-        self._save_config()
-        self.router.stop()
+        if getattr(self, "_splash_anim_job", None) is not None:
+            try:
+                self.after_cancel(self._splash_anim_job)
+            except Exception:
+                pass
+        if self._is_loaded:
+            try:
+                self._stop_hotkey_listener()
+            except Exception:
+                pass
+            try:
+                self._save_config()
+            except Exception:
+                pass
+            router = getattr(self, "router", None)
+            if router is not None:
+                try:
+                    router.stop()
+                except Exception:
+                    pass
         if self._tray_icon is not None:
             try:
                 self._tray_icon.stop()
