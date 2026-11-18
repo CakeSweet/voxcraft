@@ -200,18 +200,18 @@ class VoxCraftApp(ctk.CTk):
         titles = ctk.CTkFrame(hdr, fg_color="transparent")
         titles.pack(side="left")
         ctk.CTkLabel(
-            titles, text="VoxCraft Studio", font=ctk.CTkFont(size=22, weight="bold"), text_color="#4cc9f0"
+            titles, text="VoxCraft Studio", font=ctk.CTkFont(size=22, weight="bold"), text_color="#38bdf8"
         ).pack(anchor="w")
         ctk.CTkLabel(
             titles,
-            text=f"Modulador de Voz em Tempo Real • v{APP_VERSION}",
+            text=f"v{APP_VERSION}",
             font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
+            text_color="#64748b",
         ).pack(anchor="w")
 
         self._splash_lbl = ctk.CTkLabel(
             self._splash_frame,
-            text="Carregando motor de áudio (NumPy / SciPy)...",
+            text="Carregando...",
             font=ctk.CTkFont(size=12),
             text_color="#cbd5e1",
         )
@@ -374,8 +374,8 @@ class VoxCraftApp(ctk.CTk):
         except Exception:
             pass
 
-        self.title("VoxCraft Studio — Modulador de Voz em Tempo Real (Estilo Audacity)")
-        self.configure(fg_color=("#ebebeb", "#1a1a1a"))
+        self.title("VoxCraft Studio")
+        self.configure(fg_color="#0b101b")
         w, h = 1220, 780
         scr_w = self.winfo_screenwidth()
         scr_h = self.winfo_screenheight()
@@ -490,64 +490,96 @@ class VoxCraftApp(ctk.CTk):
     # ------------------------------------------------------------------ #
     def _build_layout(self):
         root = getattr(self, "main_container", self)
+
         # Barra Superior
-        topbar = ctk.CTkFrame(root, height=64, corner_radius=10, fg_color="#161b24")
-        topbar.pack(fill="x", padx=12, pady=(10, 6))
+        topbar = ctk.CTkFrame(
+            root, height=62, corner_radius=14, fg_color="#111827", border_width=1, border_color="#1f2937"
+        )
+        topbar.pack(fill="x", padx=14, pady=(12, 8))
         topbar.pack_propagate(False)
 
         title_box = ctk.CTkFrame(topbar, fg_color="transparent")
-        title_box.pack(side="left", padx=(12, 8))
+        title_box.pack(side="left", padx=(16, 14))
         ctk.CTkLabel(
-            title_box, text="VoxCraft Studio", font=ctk.CTkFont(size=20, weight="bold"), text_color="#4cc9f0"
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            title_box,
-            text="Modulador estilo Audacity em tempo real",
-            font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
+            title_box, text="VoxCraft Studio", font=ctk.CTkFont(size=19, weight="bold"), text_color="#38bdf8"
         ).pack(anchor="w")
 
         # Controles de Preset no Topo
         preset_box = ctk.CTkFrame(topbar, fg_color="transparent")
-        preset_box.pack(side="left", padx=8)
-        ctk.CTkLabel(preset_box, text="Voz / Preset:", font=ctk.CTkFont(size=12, weight="bold")).pack(
-            side="left", padx=(0, 6)
+        preset_box.pack(side="left", padx=6)
+        ctk.CTkLabel(preset_box, text="Preset", font=ctk.CTkFont(size=12), text_color="#94a3b8").pack(
+            side="left", padx=(0, 8)
         )
         self.preset_var = ctk.StringVar(value="Normal (Limpo + Gate)")
         self.preset_menu = ctk.CTkOptionMenu(
             preset_box,
             variable=self.preset_var,
             values=self._all_preset_names(),
-            width=195,
+            width=210,
+            height=32,
+            corner_radius=8,
+            fg_color="#1e293b",
+            button_color="#27354a",
+            button_hover_color="#334155",
+            dropdown_fg_color="#111827",
             command=self._on_preset_selected,
         )
         self.preset_menu.pack(side="left", padx=3)
 
         ctk.CTkButton(
-            preset_box, text="Salvar Voz", width=82, fg_color="#2563eb", command=self._save_custom_preset
+            preset_box,
+            text="Salvar",
+            width=74,
+            height=32,
+            corner_radius=8,
+            fg_color="#1e293b",
+            hover_color="#2563eb",
+            border_width=1,
+            border_color="#334155",
+            command=self._save_custom_preset,
         ).pack(side="left", padx=3)
         ctk.CTkButton(
-            preset_box, text="Excluir", width=58, fg_color="#475569", hover_color="#dc2626",
-            command=self._delete_custom_preset
+            preset_box,
+            text="Excluir",
+            width=66,
+            height=32,
+            corner_radius=8,
+            fg_color="#1e293b",
+            hover_color="#dc2626",
+            border_width=1,
+            border_color="#334155",
+            command=self._delete_custom_preset,
         ).pack(side="left", padx=3)
 
-        # Botões da Direita (Atualizar App, Guia, Bypass, Ligar)
+        # Botões da Direita
         right_top = ctk.CTkFrame(topbar, fg_color="transparent")
-        right_top.pack(side="right", padx=8)
+        right_top.pack(side="right", padx=12)
 
         self.update_btn = ctk.CTkButton(
             right_top,
-            text="Atualizar App",
-            width=106,
-            fg_color="#2563eb",
-            hover_color="#1d4ed8",
+            text="Atualizar",
+            width=86,
+            height=32,
+            corner_radius=8,
+            fg_color="#1e293b",
+            hover_color="#2563eb",
+            border_width=1,
+            border_color="#334155",
             command=self._start_app_update,
         )
         self.update_btn.pack(side="left", padx=4)
 
         ctk.CTkButton(
-            right_top, text="Guia Discord", width=102, fg_color="#334155",
-            hover_color="#475569", command=self._open_discord_guide
+            right_top,
+            text="Discord",
+            width=78,
+            height=32,
+            corner_radius=8,
+            fg_color="#1e293b",
+            hover_color="#334155",
+            border_width=1,
+            border_color="#334155",
+            command=self._open_discord_guide,
         ).pack(side="left", padx=4)
 
         self.bypass_var = ctk.BooleanVar(value=False)
@@ -555,221 +587,303 @@ class VoxCraftApp(ctk.CTk):
             right_top,
             text="Voz Original",
             variable=self.bypass_var,
+            fg_color="#243247",
             progress_color="#f59e0b",
+            button_color="#e2e8f0",
+            button_hover_color="#ffffff",
             command=self._on_param_change,
         )
-        self.bypass_btn.pack(side="left", padx=6)
+        self.bypass_btn.pack(side="left", padx=(10, 10))
 
         self.power_btn = ctk.CTkButton(
             right_top,
-            text="INICIAR ÁUDIO",
-            width=145,
-            height=38,
+            text="Iniciar Áudio",
+            width=138,
+            height=36,
+            corner_radius=9,
             font=ctk.CTkFont(size=13, weight="bold"),
-            fg_color="#10b981",
-            hover_color="#059669",
+            fg_color="#059669",
+            hover_color="#10b981",
             command=self._toggle_audio,
         )
-        self.power_btn.pack(side="left", padx=4)
+        self.power_btn.pack(side="left", padx=2)
 
         # Corpo Principal: Sidebar (Esquerda) + Workbench (Direita)
         body = ctk.CTkFrame(root, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=12, pady=(2, 10))
+        body.pack(fill="both", expand=True, padx=14, pady=(0, 12))
 
         self._build_sidebar(body)
         self._build_workbench(body)
 
     def _build_sidebar(self, parent):
-        side = ctk.CTkScrollableFrame(parent, width=320, corner_radius=10, fg_color="#161b24")
-        side.pack(side="left", fill="y", padx=(0, 8))
+        side = ctk.CTkScrollableFrame(
+            parent, width=316, corner_radius=14, fg_color="#111827", border_width=1, border_color="#1f2937"
+        )
+        side.pack(side="left", fill="y", padx=(0, 10))
+
+        # Card: Roteamento
+        route_card = ctk.CTkFrame(
+            side, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044"
+        )
+        route_card.pack(fill="x", padx=8, pady=(8, 6))
 
         ctk.CTkLabel(
-            side, text="Roteamento de Áudio", font=ctk.CTkFont(size=15, weight="bold"), text_color="#e2e8f0"
-        ).pack(anchor="w", padx=10, pady=(6, 4))
+            route_card, text="Áudio", font=ctk.CTkFont(size=14, weight="bold"), text_color="#e2e8f0"
+        ).pack(anchor="w", padx=12, pady=(10, 6))
 
-        # Entrada
-        ctk.CTkLabel(side, text="Microfone (Entrada):", font=ctk.CTkFont(size=12)).pack(anchor="w", padx=10)
+        ctk.CTkLabel(route_card, text="Microfone", font=ctk.CTkFont(size=12), text_color="#94a3b8").pack(
+            anchor="w", padx=12
+        )
         self.in_dev_var = ctk.StringVar()
         self.in_dev_menu = ctk.CTkOptionMenu(
-            side, variable=self.in_dev_var, values=[""], width=285, command=self._on_device_changed
+            route_card,
+            variable=self.in_dev_var,
+            values=[""],
+            width=276,
+            height=30,
+            corner_radius=8,
+            fg_color="#1e293b",
+            button_color="#27354a",
+            button_hover_color="#334155",
+            dropdown_fg_color="#111827",
+            command=self._on_device_changed,
         )
-        self.in_dev_menu.pack(padx=10, pady=(2, 8))
+        self.in_dev_menu.pack(padx=12, pady=(3, 8))
 
-        # Saída
-        ctk.CTkLabel(side, text="Saída (VB-Cable p/ Discord ou Fone):", font=ctk.CTkFont(size=12)).pack(
-            anchor="w", padx=10
+        ctk.CTkLabel(route_card, text="Saída", font=ctk.CTkFont(size=12), text_color="#94a3b8").pack(
+            anchor="w", padx=12
         )
         self.out_dev_var = ctk.StringVar()
         self.out_dev_menu = ctk.CTkOptionMenu(
-            side, variable=self.out_dev_var, values=[""], width=285, command=self._on_device_changed
+            route_card,
+            variable=self.out_dev_var,
+            values=[""],
+            width=276,
+            height=30,
+            corner_radius=8,
+            fg_color="#1e293b",
+            button_color="#27354a",
+            button_hover_color="#334155",
+            dropdown_fg_color="#111827",
+            command=self._on_device_changed,
         )
-        self.out_dev_menu.pack(padx=10, pady=(2, 8))
+        self.out_dev_menu.pack(padx=12, pady=(3, 8))
 
-        # Monitoramento (Ouvir a própria voz)
         self.monitor_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
-            side, text="Ouvir minha voz (Monitor no Fone)", variable=self.monitor_var, command=self._on_routing_pref_changed
-        ).pack(anchor="w", padx=10, pady=(4, 4))
+            route_card,
+            text="Ouvir minha voz",
+            variable=self.monitor_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
+            command=self._on_routing_pref_changed,
+        ).pack(anchor="w", padx=12, pady=(4, 4))
         self.mon_dev_var = ctk.StringVar()
         self.mon_dev_menu = ctk.CTkOptionMenu(
-            side, variable=self.mon_dev_var, values=[""], width=285, command=self._on_device_changed
+            route_card,
+            variable=self.mon_dev_var,
+            values=[""],
+            width=276,
+            height=30,
+            corner_radius=8,
+            fg_color="#1e293b",
+            button_color="#27354a",
+            button_hover_color="#334155",
+            dropdown_fg_color="#111827",
+            command=self._on_device_changed,
         )
-        self.mon_dev_menu.pack(padx=10, pady=(2, 8))
+        self.mon_dev_menu.pack(padx=12, pady=(3, 8))
 
-        # Latência e Atualizar
-        lat_row = ctk.CTkFrame(side, fg_color="transparent")
-        lat_row.pack(fill="x", padx=10, pady=(2, 6))
-        ctk.CTkLabel(lat_row, text="Buffer / Latência:", font=ctk.CTkFont(size=12)).pack(side="left")
+        lat_row = ctk.CTkFrame(route_card, fg_color="transparent")
+        lat_row.pack(fill="x", padx=12, pady=(2, 8))
+        ctk.CTkLabel(lat_row, text="Latência", font=ctk.CTkFont(size=12), text_color="#94a3b8").pack(side="left")
         self.latency_var = ctk.StringVar(value="Baixa (512)")
         ctk.CTkOptionMenu(
             lat_row,
             variable=self.latency_var,
             values=["Ultra (256)", "Baixa (512)", "Estável (1024)"],
             width=145,
+            height=28,
+            corner_radius=8,
+            fg_color="#1e293b",
+            button_color="#27354a",
+            button_hover_color="#334155",
+            dropdown_fg_color="#111827",
             command=lambda _: self._on_routing_pref_changed(),
         ).pack(side="right")
 
-        # Comportamento ao Fechar (Bandeja / Tray)
         self.minimize_to_tray_var = ctk.BooleanVar(value=pystray is not None)
         ctk.CTkSwitch(
-            side,
-            text="Ao fechar (X): Minimizar na Bandeja",
+            route_card,
+            text="Minimizar na bandeja",
             variable=self.minimize_to_tray_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._save_config,
-        ).pack(anchor="w", padx=10, pady=(2, 6))
+        ).pack(anchor="w", padx=12, pady=(2, 8))
 
         ctk.CTkButton(
-            side,
+            route_card,
             text="Atualizar Dispositivos",
-            height=28,
-            fg_color="#334155",
+            height=30,
+            corner_radius=8,
+            fg_color="#1e293b",
+            hover_color="#2d3b52",
+            border_width=1,
+            border_color="#334155",
             command=lambda: self._refresh_devices(reinit_backend=True),
-        ).pack(fill="x", padx=10, pady=(2, 6))
+        ).pack(fill="x", padx=12, pady=(2, 8))
 
         self.status_lbl = ctk.CTkLabel(
-            side, text="Status: Parado", font=ctk.CTkFont(size=11), text_color="#94a3b8", wraplength=280
+            route_card, text="Parado", font=ctk.CTkFont(size=11), text_color="#94a3b8", wraplength=272
         )
-        self.status_lbl.pack(anchor="w", padx=10, pady=(0, 8))
+        self.status_lbl.pack(anchor="w", padx=12, pady=(0, 10))
 
-        # Card: Tecla de Atalho (Alternar Efeito <-> Voz Normal)
-        hk_card = ctk.CTkFrame(side, fg_color="#0f172a", corner_radius=8)
-        hk_card.pack(fill="x", padx=10, pady=6)
+        # Card: Atalho Global
+        hk_card = ctk.CTkFrame(
+            side, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044"
+        )
+        hk_card.pack(fill="x", padx=8, pady=6)
 
-        ctk.CTkLabel(hk_card, text="Atalho (Efeito ↔ Normal)", font=ctk.CTkFont(size=12, weight="bold")).pack(
-            anchor="w", padx=10, pady=(6, 4)
+        ctk.CTkLabel(hk_card, text="Atalho", font=ctk.CTkFont(size=13, weight="bold"), text_color="#e2e8f0").pack(
+            anchor="w", padx=12, pady=(10, 6)
         )
 
         self.hotkey_en_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(
             hk_card,
-            text="Ativar tecla de atalho",
+            text="Ativar atalho",
             variable=self.hotkey_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_hotkey_setting_changed,
-        ).pack(anchor="w", padx=10, pady=(0, 6))
+        ).pack(anchor="w", padx=12, pady=(0, 6))
 
         hk_row = ctk.CTkFrame(hk_card, fg_color="transparent")
-        hk_row.pack(fill="x", padx=10, pady=(0, 6))
-        ctk.CTkLabel(hk_row, text="Tecla:", font=ctk.CTkFont(size=12)).pack(side="left")
+        hk_row.pack(fill="x", padx=12, pady=(0, 6))
+        ctk.CTkLabel(hk_row, text="Tecla", font=ctk.CTkFont(size=12), text_color="#94a3b8").pack(side="left")
         self.hotkey_btn = ctk.CTkButton(
             hk_row,
             text="F9",
             height=28,
+            corner_radius=8,
             fg_color="#1e293b",
             hover_color="#334155",
+            border_width=1,
+            border_color="#334155",
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._toggle_hotkey_capture,
         )
-        self.hotkey_btn.pack(side="left", fill="x", expand=True, padx=(8, 4))
+        self.hotkey_btn.pack(side="left", fill="x", expand=True, padx=(10, 0))
 
         self.hotkey_hold_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             hk_card,
-            text="Manter segurando (Segurar tecla)",
+            text="Segurar tecla",
             variable=self.hotkey_hold_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_hotkey_setting_changed,
-        ).pack(anchor="w", padx=10, pady=(2, 4))
+        ).pack(anchor="w", padx=12, pady=(2, 4))
 
         self.hotkey_hint_lbl = ctk.CTkLabel(
             hk_card,
-            text="● Modo: Efeito Ativo (Pressione F9)",
+            text="● Efeito Ativo (F9)",
             font=ctk.CTkFont(size=11),
-            text_color="#4cc9f0",
+            text_color="#38bdf8",
             wraplength=265,
             justify="left",
         )
-        self.hotkey_hint_lbl.pack(anchor="w", padx=10, pady=(0, 8))
+        self.hotkey_hint_lbl.pack(anchor="w", padx=12, pady=(2, 10))
 
-        # Medidores ao vivo + Osciloscópio
-        meter_card = ctk.CTkFrame(side, fg_color="#0f172a", corner_radius=8)
-        meter_card.pack(fill="x", padx=10, pady=6)
+        # Card: Níveis & Osciloscópio
+        meter_card = ctk.CTkFrame(
+            side, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044"
+        )
+        meter_card.pack(fill="x", padx=8, pady=6)
 
-        ctk.CTkLabel(meter_card, text="Níveis & Forma de Onda", font=ctk.CTkFont(size=12, weight="bold")).pack(
-            anchor="w", padx=10, pady=(6, 4)
+        ctk.CTkLabel(meter_card, text="Níveis", font=ctk.CTkFont(size=13, weight="bold"), text_color="#e2e8f0").pack(
+            anchor="w", padx=12, pady=(10, 6)
         )
 
-        # Entrada VU
         row_in = ctk.CTkFrame(meter_card, fg_color="transparent")
-        row_in.pack(fill="x", padx=10)
-        ctk.CTkLabel(row_in, text="Entrada", width=55, anchor="w", font=ctk.CTkFont(size=11)).pack(side="left")
-        self.in_bar = ctk.CTkProgressBar(row_in, height=10, progress_color="#38bdf8")
+        row_in.pack(fill="x", padx=12)
+        ctk.CTkLabel(row_in, text="Entrada", width=55, anchor="w", font=ctk.CTkFont(size=11), text_color="#94a3b8").pack(side="left")
+        self.in_bar = ctk.CTkProgressBar(row_in, height=8, fg_color="#243247", progress_color="#38bdf8")
         self.in_bar.set(0)
         self.in_bar.pack(side="left", fill="x", expand=True, padx=6)
 
-        # Saída VU
         row_out = ctk.CTkFrame(meter_card, fg_color="transparent")
-        row_out.pack(fill="x", padx=10, pady=(4, 4))
-        ctk.CTkLabel(row_out, text="Saída", width=55, anchor="w", font=ctk.CTkFont(size=11)).pack(side="left")
-        self.out_bar = ctk.CTkProgressBar(row_out, height=10, progress_color="#10b981")
+        row_out.pack(fill="x", padx=12, pady=(6, 4))
+        ctk.CTkLabel(row_out, text="Saída", width=55, anchor="w", font=ctk.CTkFont(size=11), text_color="#94a3b8").pack(side="left")
+        self.out_bar = ctk.CTkProgressBar(row_out, height=8, fg_color="#243247", progress_color="#10b981")
         self.out_bar.set(0)
         self.out_bar.pack(side="left", fill="x", expand=True, padx=6)
 
         self.gate_led = ctk.CTkLabel(
             meter_card, text="● Noise Gate: Aberto", font=ctk.CTkFont(size=11), text_color="#10b981"
         )
-        self.gate_led.pack(anchor="w", padx=10, pady=(0, 4))
+        self.gate_led.pack(anchor="w", padx=12, pady=(2, 4))
 
-        self.wave_canvas = tk.Canvas(meter_card, height=68, bg="#090d16", highlightthickness=0)
-        self.wave_canvas.pack(fill="x", padx=10, pady=(2, 10))
-
-        # Pré-processamento & Ganho Final
-        dyn_card = ctk.CTkFrame(side, fg_color="#0f172a", corner_radius=8)
-        dyn_card.pack(fill="x", padx=10, pady=6)
-        ctk.CTkLabel(dyn_card, text="Limpeza & Ganho", font=ctk.CTkFont(size=12, weight="bold")).pack(
-            anchor="w", padx=10, pady=(6, 4)
+        self.wave_canvas = tk.Canvas(
+            meter_card, height=64, bg="#0b101b", highlightthickness=1, highlightbackground="#1f2937"
         )
+        self.wave_canvas.pack(fill="x", padx=12, pady=(2, 12))
 
-        self.input_gain_var = self._add_slider(
-            dyn_card, "Ganho Entrada (Mic)", -18.0, 24.0, 0.0, "dB"
+        # Card: Dinâmica & Ganho
+        dyn_card = ctk.CTkFrame(
+            side, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044"
         )
+        dyn_card.pack(fill="x", padx=8, pady=(6, 10))
+        ctk.CTkLabel(
+            dyn_card, text="Dinâmica & Ganho", font=ctk.CTkFont(size=13, weight="bold"), text_color="#e2e8f0"
+        ).pack(anchor="w", padx=12, pady=(10, 6))
+
+        self.input_gain_var = self._add_slider(dyn_card, "Ganho de Entrada", -18.0, 24.0, 0.0, "dB")
         self.gate_en_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(
-            dyn_card, text="Noise Gate (Corta ruído)", variable=self.gate_en_var, command=self._on_param_change
-        ).pack(anchor="w", padx=10, pady=(4, 0))
-        self.gate_thresh_var = self._add_slider(
-            dyn_card, "Limite do Gate", -65.0, -15.0, -42.0, "dB"
-        )
+            dyn_card,
+            text="Noise Gate",
+            variable=self.gate_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
+            command=self._on_param_change,
+        ).pack(anchor="w", padx=12, pady=(6, 0))
+        self.gate_thresh_var = self._add_slider(dyn_card, "Limite do Gate", -65.0, -15.0, -42.0, "dB")
 
         self.comp_en_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(
-            dyn_card, text="Compressor (Nivelar voz)", variable=self.comp_en_var, command=self._on_param_change
-        ).pack(anchor="w", padx=10, pady=(4, 0))
-        self.comp_thresh_var = self._add_slider(
-            dyn_card, "Limite Compressor", -36.0, -4.0, -18.0, "dB"
-        )
-        self.output_gain_var = self._add_slider(
-            dyn_card, "Volume Final (Saída)", -24.0, 24.0, 0.0, "dB"
-        )
+            dyn_card,
+            text="Compressor",
+            variable=self.comp_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
+            command=self._on_param_change,
+        ).pack(anchor="w", padx=12, pady=(6, 0))
+        self.comp_thresh_var = self._add_slider(dyn_card, "Limite Compressor", -36.0, -4.0, -18.0, "dB")
+        self.output_gain_var = self._add_slider(dyn_card, "Volume de Saída", -24.0, 24.0, 0.0, "dB")
 
     def _build_workbench(self, parent):
-        self.tabs = ctk.CTkTabview(parent, corner_radius=10, fg_color="#161b24")
+        self.tabs = ctk.CTkTabview(
+            parent,
+            corner_radius=14,
+            fg_color="#111827",
+            border_width=1,
+            border_color="#1f2937",
+            segmented_button_fg_color="#0b101b",
+            segmented_button_selected_color="#1e293b",
+            segmented_button_selected_hover_color="#27354a",
+            segmented_button_unselected_color="#0b101b",
+            segmented_button_unselected_hover_color="#162032",
+        )
         self.tabs.pack(side="left", fill="both", expand=True)
 
-        t_pitch = self.tabs.add("1. Tom & Vocoder")
-        t_eq = self.tabs.add("2. Equalizador")
-        t_mod = self.tabs.add("3. Modulação (Audacity)")
-        t_fx = self.tabs.add("4. Robô & Distorção")
-        t_space = self.tabs.add("5. Eco & Reverb")
-        t_mixer = self.tabs.add("6. Mixer Rápido")
+        t_pitch = self.tabs.add("Tom & Vocoder")
+        t_eq = self.tabs.add("Equalizador")
+        t_mod = self.tabs.add("Modulação")
+        t_fx = self.tabs.add("Robô & Distorção")
+        t_space = self.tabs.add("Eco & Reverb")
+        t_mixer = self.tabs.add("Mixer")
 
         self._build_pitch_tab(t_pitch)
         self._build_eq_tab(t_eq)
@@ -782,182 +896,198 @@ class VoxCraftApp(ctk.CTk):
         scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
 
-        # Card: Alterar Tom (Pitch Shifter)
-        card1 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        # Card: Alterar Tom
+        card1 = ctk.CTkFrame(
+            scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044"
+        )
         card1.pack(fill="x", padx=10, pady=8)
 
         hdr1 = ctk.CTkFrame(card1, fg_color="transparent")
-        hdr1.pack(fill="x", padx=14, pady=(10, 4))
+        hdr1.pack(fill="x", padx=16, pady=(12, 8))
         self.pitch_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             hdr1,
-            text="Alterar Tom (Pitch Shifter — estilo 'Alterar Tom' do Audacity)",
+            text="Alterar Tom (Pitch)",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.pitch_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
         ).pack(side="left")
 
-        ctk.CTkLabel(
-            card1,
-            text="Valores negativos deixam a voz mais grave/monstro; positivos deixam mais fina/aguda, mantendo a velocidade da fala.",
-            font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
-        ).pack(anchor="w", padx=14, pady=(0, 8))
-
         self.pitch_st_var = self._add_slider(card1, "Semitons", -12.0, 12.0, 0.0, "st", step=0.1)
-        self.pitch_cents_var = self._add_slider(card1, "Ajuste Fino (Cents)", -100.0, 100.0, 0.0, "ct", step=1.0)
-        self.pitch_mix_var = self._add_slider(card1, "Mistura (Dry / Wet)", 0.0, 100.0, 100.0, "%", step=1.0)
+        self.pitch_cents_var = self._add_slider(card1, "Ajuste Fino", -100.0, 100.0, 0.0, "ct", step=1.0)
+        self.pitch_mix_var = self._add_slider(card1, "Mistura", 0.0, 100.0, 100.0, "%", step=1.0)
 
-        # Atalhos rápidos de Pitch
         qrow = ctk.CTkFrame(card1, fg_color="transparent")
-        qrow.pack(fill="x", padx=14, pady=(4, 12))
-        ctk.CTkLabel(qrow, text="Atalhos rápidos:", font=ctk.CTkFont(size=11), text_color="#94a3b8").pack(
-            side="left", padx=(0, 8)
-        )
+        qrow.pack(fill="x", padx=14, pady=(6, 14))
         for label, st_val in [
-            ("-1 Oitava (-12)", -12.0),
-            ("Grave (-5)", -5.0),
-            ("Leve Grave (-2)", -2.0),
-            ("Original (0)", 0.0),
-            ("Fina (+4)", 4.0),
-            ("Esquilo (+7)", 7.0),
-            ("+1 Oitava (+12)", 12.0),
+            ("-12 st", -12.0),
+            ("-5 st", -5.0),
+            ("-2 st", -2.0),
+            ("0 st", 0.0),
+            ("+4 st", 4.0),
+            ("+7 st", 7.0),
+            ("+12 st", 12.0),
         ]:
             ctk.CTkButton(
                 qrow,
                 text=label,
-                width=90,
-                height=26,
+                width=74,
+                height=28,
+                corner_radius=8,
                 fg_color="#1e293b",
                 hover_color="#334155",
                 command=lambda v=st_val: self._quick_pitch(v),
-            ).pack(side="left", padx=3)
+            ).pack(side="left", padx=4)
 
-        # Card: Frequency Shifter (Hilbert)
-        card2 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        # Card: Frequency Shifter
+        card2 = ctk.CTkFrame(
+            scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044"
+        )
         card2.pack(fill="x", padx=10, pady=8)
 
         hdr2 = ctk.CTkFrame(card2, fg_color="transparent")
-        hdr2.pack(fill="x", padx=14, pady=(10, 4))
+        hdr2.pack(fill="x", padx=16, pady=(12, 8))
         self.fshift_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             hdr2,
-            text="Frequency Shifter (Deslocamento Linear em Hz)",
+            text="Frequency Shifter",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.fshift_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
         ).pack(side="left")
 
-        ctk.CTkLabel(
-            card2,
-            text="Diferente do Pitch, desloca todas as frequências por um valor fixo em Hz (+ ou -). Cria vozes alienígenas, metálicas e sintéticas!",
-            font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
-        ).pack(anchor="w", padx=14, pady=(0, 8))
-
-        self.fshift_hz_var = self._add_slider(card2, "Deslocamento (Hz)", -500.0, 500.0, 0.0, "Hz", step=1.0)
-        self.fshift_mix_var = self._add_slider(card2, "Mistura (Dry / Wet)", 0.0, 100.0, 100.0, "%", step=1.0)
+        self.fshift_hz_var = self._add_slider(card2, "Deslocamento", -500.0, 500.0, 0.0, "Hz", step=1.0)
+        self.fshift_mix_var = self._add_slider(card2, "Mistura", 0.0, 100.0, 100.0, "%", step=1.0)
 
         qrow2 = ctk.CTkFrame(card2, fg_color="transparent")
-        qrow2.pack(fill="x", padx=14, pady=(4, 12))
+        qrow2.pack(fill="x", padx=14, pady=(6, 14))
         for label, hz_val in [("-120 Hz", -120.0), ("-30 Hz", -30.0), ("0 Hz", 0.0), ("+50 Hz", 50.0), ("+180 Hz", 180.0)]:
             ctk.CTkButton(
                 qrow2,
                 text=label,
-                width=85,
-                height=26,
+                width=82,
+                height=28,
+                corner_radius=8,
                 fg_color="#1e293b",
                 hover_color="#334155",
                 command=lambda v=hz_val: self._quick_fshift(v),
             ).pack(side="left", padx=4)
 
-        # Card: Vocoder (estilo Audacity)
-        card3 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        # Card: Vocoder
+        card3 = ctk.CTkFrame(
+            scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044"
+        )
         card3.pack(fill="x", padx=10, pady=8)
 
         hdr3 = ctk.CTkFrame(card3, fg_color="transparent")
-        hdr3.pack(fill="x", padx=14, pady=(10, 4))
+        hdr3.pack(fill="x", padx=16, pady=(12, 8))
         self.voc_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             hdr3,
-            text="Vocoder (estilo 'Vocoder' do Audacity — 12 Bandas)",
+            text="Vocoder",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.voc_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
         ).pack(side="left")
 
-        ctk.CTkLabel(
-            card3,
-            text="Transforma a sua fala modulando uma onda sintetizada ou ruído de sussurro em 12 faixas de frequência (Daft Punk / Fantasma).",
-            font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
-        ).pack(anchor="w", padx=14, pady=(0, 8))
-
         voc_row = ctk.CTkFrame(card3, fg_color="transparent")
-        voc_row.pack(fill="x", padx=14, pady=(0, 6))
-        ctk.CTkLabel(voc_row, text="Portadora (Carrier):", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 10))
+        voc_row.pack(fill="x", padx=16, pady=(0, 8))
+        ctk.CTkLabel(voc_row, text="Portadora", font=ctk.CTkFont(size=12), text_color="#94a3b8").pack(
+            side="left", padx=(0, 12)
+        )
         self.voc_carrier_var = ctk.StringVar(value="Dente de Serra")
         ctk.CTkOptionMenu(
             voc_row,
             variable=self.voc_carrier_var,
             values=["Dente de Serra", "Acorde", "Quadrada", "Sussurro (Ruído)"],
+            corner_radius=8,
+            fg_color="#1e293b",
+            button_color="#27354a",
+            button_hover_color="#334155",
+            dropdown_fg_color="#111827",
             command=lambda _: self._on_param_change(),
         ).pack(side="left")
 
-        self.voc_freq_var = self._add_slider(card3, "Nota / Frequência Base", 55.0, 300.0, 110.0, "Hz", step=1.0)
-        self.voc_smooth_var = self._add_slider(card3, "Suavidade do Envelope", 10.0, 95.0, 45.0, "%", step=1.0)
-        self.voc_mix_var = self._add_slider(card3, "Mistura (Dry / Wet)", 0.0, 100.0, 85.0, "%", step=1.0)
+        self.voc_freq_var = self._add_slider(card3, "Frequência Base", 55.0, 300.0, 110.0, "Hz", step=1.0)
+        self.voc_smooth_var = self._add_slider(card3, "Suavidade", 10.0, 95.0, 45.0, "%", step=1.0)
+        self.voc_mix_var = self._add_slider(card3, "Mistura", 0.0, 100.0, 85.0, "%", step=1.0)
 
     def _build_eq_tab(self, tab):
-        top = ctk.CTkFrame(tab, fg_color="#0f172a", corner_radius=10)
+        top = ctk.CTkFrame(
+            tab, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044"
+        )
         top.pack(fill="x", padx=10, pady=8)
 
         hdr = ctk.CTkFrame(top, fg_color="transparent")
-        hdr.pack(fill="x", padx=14, pady=(8, 4))
+        hdr.pack(fill="x", padx=16, pady=(10, 6))
         self.eq_en_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(
             hdr,
-            text="Ativar Equalizador (Curva de Filtro estilo Audacity)",
+            text="Equalizador",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.eq_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
         ).pack(side="left")
 
         ctk.CTkButton(
-            hdr, text="Zerar EQ (Flat)", width=110, height=28, fg_color="#334155", command=self._reset_eq
+            hdr,
+            text="Zerar EQ",
+            width=96,
+            height=28,
+            corner_radius=8,
+            fg_color="#1e293b",
+            hover_color="#334155",
+            command=self._reset_eq,
         ).pack(side="right")
 
-        # Gráfico da curva de resposta de frequência
-        self.eq_canvas = tk.Canvas(top, height=195, bg="#090d16", highlightthickness=1, highlightbackground="#1e293b")
-        self.eq_canvas.pack(fill="x", padx=14, pady=(4, 12))
+        self.eq_canvas = tk.Canvas(
+            top, height=190, bg="#0b101b", highlightthickness=1, highlightbackground="#1f2937"
+        )
+        self.eq_canvas.pack(fill="x", padx=16, pady=(4, 14))
         self.eq_canvas.bind("<Configure>", lambda _e: self._schedule_eq_redraw())
 
-        # Controles de Corte (HPF / LPF) e 5 Bandas
-        bot = ctk.CTkFrame(tab, fg_color="#0f172a", corner_radius=10)
+        bot = ctk.CTkFrame(
+            tab, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044"
+        )
         bot.pack(fill="both", expand=True, padx=10, pady=(0, 8))
 
         cuts = ctk.CTkFrame(bot, fg_color="transparent")
-        cuts.pack(fill="x", padx=14, pady=(10, 4))
+        cuts.pack(fill="x", padx=14, pady=(12, 6))
 
-        # HPF
-        hpf_box = ctk.CTkFrame(cuts, fg_color="#161f33", corner_radius=8)
+        hpf_box = ctk.CTkFrame(cuts, fg_color="#1b263b", corner_radius=10)
         hpf_box.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self.hpf_en_var = ctk.BooleanVar(value=True)
         ctk.CTkSwitch(
-            hpf_box, text="Corte Graves (Passa-Altas)", variable=self.hpf_en_var, command=self._on_param_change
-        ).pack(anchor="w", padx=10, pady=(6, 0))
+            hpf_box,
+            text="Passa-Altas (HPF)",
+            variable=self.hpf_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
+            command=self._on_param_change,
+        ).pack(anchor="w", padx=12, pady=(8, 0))
         self.hpf_hz_var = self._add_slider(hpf_box, "Frequência", 20.0, 1000.0, 80.0, "Hz", step=5.0)
 
-        # LPF
-        lpf_box = ctk.CTkFrame(cuts, fg_color="#161f33", corner_radius=8)
+        lpf_box = ctk.CTkFrame(cuts, fg_color="#1b263b", corner_radius=10)
         lpf_box.pack(side="left", fill="x", expand=True, padx=(6, 0))
         self.lpf_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
-            lpf_box, text="Corte Agudos (Passa-Baixas)", variable=self.lpf_en_var, command=self._on_param_change
-        ).pack(anchor="w", padx=10, pady=(6, 0))
+            lpf_box,
+            text="Passa-Baixas (LPF)",
+            variable=self.lpf_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
+            command=self._on_param_change,
+        ).pack(anchor="w", padx=12, pady=(8, 0))
         self.lpf_hz_var = self._add_slider(lpf_box, "Frequência", 1200.0, 18000.0, 12000.0, "Hz", step=100.0)
 
-        # 5 Bandas verticais estilo mesa / Audacity
         bands_frame = ctk.CTkFrame(bot, fg_color="transparent")
         bands_frame.pack(fill="both", expand=True, padx=14, pady=8)
 
@@ -971,255 +1101,253 @@ class VoxCraftApp(ctk.CTk):
         scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
 
-        # Phaser (estilo Audacity)
-        c1 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c1 = ctk.CTkFrame(scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044")
         c1.pack(fill="x", padx=10, pady=8)
         self.phaser_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             c1,
-            text="Phaser (estilo 'Phaser' do Audacity)",
+            text="Phaser",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.phaser_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
-        ).pack(anchor="w", padx=14, pady=(10, 2))
-        ctk.CTkLabel(
-            c1,
-            text="Cria varreduras espaciais e futuristas de fase (efeito nave espacial / sci-fi).",
-            font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
-        ).pack(anchor="w", padx=14, pady=(0, 8))
-        self.phaser_stages_var = self._add_slider(c1, "Estágios (Stages)", 2.0, 12.0, 6.0, "x", step=2.0)
+        ).pack(anchor="w", padx=16, pady=(12, 8))
+        self.phaser_stages_var = self._add_slider(c1, "Estágios", 2.0, 12.0, 6.0, "x", step=2.0)
         self.phaser_freq_var = self._add_slider(c1, "Velocidade LFO", 0.1, 6.0, 0.8, "Hz", step=0.1)
-        self.phaser_depth_var = self._add_slider(c1, "Profundidade (Depth)", 0.0, 100.0, 70.0, "%", step=1.0)
+        self.phaser_depth_var = self._add_slider(c1, "Profundidade", 0.0, 100.0, 70.0, "%", step=1.0)
         self.phaser_fb_var = self._add_slider(c1, "Feedback", -90.0, 90.0, 45.0, "%", step=1.0)
-        self.phaser_mix_var = self._add_slider(c1, "Mistura (Mix)", 0.0, 100.0, 60.0, "%", step=1.0)
+        self.phaser_mix_var = self._add_slider(c1, "Mistura", 0.0, 100.0, 60.0, "%", step=1.0)
 
-        # Wahwah (estilo Audacity)
-        c2 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c2 = ctk.CTkFrame(scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044")
         c2.pack(fill="x", padx=10, pady=8)
         self.wah_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             c2,
-            text="Wahwah (estilo 'Wahwah' do Audacity)",
+            text="Wah-Wah",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.wah_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
-        ).pack(anchor="w", padx=14, pady=(10, 2))
-        ctk.CTkLabel(
-            c2,
-            text="Filtro ressonante dinâmico que abre e fecha as frequências médias automaticamente.",
-            font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
-        ).pack(anchor="w", padx=14, pady=(0, 8))
+        ).pack(anchor="w", padx=16, pady=(12, 8))
         self.wah_freq_var = self._add_slider(c2, "Frequência LFO", 0.2, 8.0, 1.5, "Hz", step=0.1)
-        self.wah_depth_var = self._add_slider(c2, "Profundidade (Depth)", 0.0, 100.0, 75.0, "%", step=1.0)
+        self.wah_depth_var = self._add_slider(c2, "Profundidade", 0.0, 100.0, 75.0, "%", step=1.0)
         self.wah_res_var = self._add_slider(c2, "Ressonância (Q)", 0.5, 8.0, 2.8, "x", step=0.1)
-        self.wah_mix_var = self._add_slider(c2, "Mistura (Mix)", 0.0, 100.0, 75.0, "%", step=1.0)
+        self.wah_mix_var = self._add_slider(c2, "Mistura", 0.0, 100.0, 75.0, "%", step=1.0)
 
-        # Chorus / Flanger
-        c3 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c3 = ctk.CTkFrame(scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044")
         c3.pack(fill="x", padx=10, pady=8)
         self.chorus_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             c3,
-            text="Chorus & Flanger (Coro / Voz Dupla / Jato)",
+            text="Chorus & Flanger",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.chorus_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
-        ).pack(anchor="w", padx=14, pady=(10, 2))
-        ctk.CTkLabel(
-            c3,
-            text="Atrasos curtos (1.5–7 ms) geram Flanger metálico; atrasos maiores (12–30 ms) criam efeito Coro / Voz Dupla.",
-            font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
-        ).pack(anchor="w", padx=14, pady=(0, 8))
+        ).pack(anchor="w", padx=16, pady=(12, 8))
         self.chorus_rate_var = self._add_slider(c3, "Velocidade LFO", 0.1, 8.0, 1.2, "Hz", step=0.1)
-        self.chorus_delay_var = self._add_slider(c3, "Atraso Base (Flanger ↔ Chorus)", 1.5, 35.0, 14.0, "ms", step=0.5)
-        self.chorus_depth_var = self._add_slider(c3, "Modulação (Depth)", 0.5, 15.0, 4.5, "ms", step=0.5)
+        self.chorus_delay_var = self._add_slider(c3, "Atraso Base", 1.5, 35.0, 14.0, "ms", step=0.5)
+        self.chorus_depth_var = self._add_slider(c3, "Modulação", 0.5, 15.0, 4.5, "ms", step=0.5)
         self.chorus_fb_var = self._add_slider(c3, "Feedback", 0.0, 85.0, 25.0, "%", step=1.0)
-        self.chorus_mix_var = self._add_slider(c3, "Mistura (Mix)", 0.0, 100.0, 50.0, "%", step=1.0)
+        self.chorus_mix_var = self._add_slider(c3, "Mistura", 0.0, 100.0, 50.0, "%", step=1.0)
 
-        # Tremolo (estilo Audacity)
-        c4 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c4 = ctk.CTkFrame(scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044")
         c4.pack(fill="x", padx=10, pady=8)
         self.trem_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             c4,
-            text="Tremolo (estilo 'Tremolo' do Audacity)",
+            text="Tremolo",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.trem_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
-        ).pack(anchor="w", padx=14, pady=(10, 2))
+        ).pack(anchor="w", padx=16, pady=(12, 8))
         trem_row = ctk.CTkFrame(c4, fg_color="transparent")
-        trem_row.pack(fill="x", padx=14, pady=(4, 6))
-        ctk.CTkLabel(trem_row, text="Forma de Onda:", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 10))
+        trem_row.pack(fill="x", padx=16, pady=(0, 8))
+        ctk.CTkLabel(trem_row, text="Forma de Onda", font=ctk.CTkFont(size=12), text_color="#94a3b8").pack(
+            side="left", padx=(0, 12)
+        )
         self.trem_wave_var = ctk.StringVar(value="Senoide")
         ctk.CTkOptionMenu(
             trem_row,
             variable=self.trem_wave_var,
             values=["Senoide", "Triangular", "Quadrada", "Dente de Serra"],
+            corner_radius=8,
+            fg_color="#1e293b",
+            button_color="#27354a",
+            button_hover_color="#334155",
+            dropdown_fg_color="#111827",
             command=lambda _: self._on_param_change(),
         ).pack(side="left")
         self.trem_freq_var = self._add_slider(c4, "Frequência", 0.5, 25.0, 6.0, "Hz", step=0.5)
-        self.trem_depth_var = self._add_slider(c4, "Intensidade (Wetness)", 0.0, 100.0, 65.0, "%", step=1.0)
+        self.trem_depth_var = self._add_slider(c4, "Intensidade", 0.0, 100.0, 65.0, "%", step=1.0)
 
     def _build_fx_tab(self, tab):
         scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
 
-        # Modulador em Anel
-        c1 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c1 = ctk.CTkFrame(scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044")
         c1.pack(fill="x", padx=10, pady=8)
         self.ring_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             c1,
-            text="Modulador em Anel / Robô (Ring Modulator)",
+            text="Ring Modulator (Robô)",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.ring_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
-        ).pack(anchor="w", padx=14, pady=(10, 2))
-        ctk.CTkLabel(
-            c1,
-            text="Multiplica a voz por uma onda osciladora. Frequências entre 30–90 Hz criam efeito Robô/Dalek clássico.",
-            font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
-        ).pack(anchor="w", padx=14, pady=(0, 8))
+        ).pack(anchor="w", padx=16, pady=(12, 8))
 
         wave_row = ctk.CTkFrame(c1, fg_color="transparent")
-        wave_row.pack(fill="x", padx=14, pady=(0, 6))
-        ctk.CTkLabel(wave_row, text="Forma de Onda:", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 10))
+        wave_row.pack(fill="x", padx=16, pady=(0, 8))
+        ctk.CTkLabel(wave_row, text="Forma de Onda", font=ctk.CTkFont(size=12), text_color="#94a3b8").pack(
+            side="left", padx=(0, 12)
+        )
         self.ring_wave_var = ctk.StringVar(value="Senoide")
         ctk.CTkOptionMenu(
             wave_row,
             variable=self.ring_wave_var,
             values=["Senoide", "Quadrada", "Triangular"],
+            corner_radius=8,
+            fg_color="#1e293b",
+            button_color="#27354a",
+            button_hover_color="#334155",
+            dropdown_fg_color="#111827",
             command=lambda _: self._on_param_change(),
         ).pack(side="left")
 
         self.ring_freq_var = self._add_slider(c1, "Frequência Portadora", 5.0, 400.0, 60.0, "Hz", step=1.0)
-        self.ring_mix_var = self._add_slider(c1, "Mistura (Mix)", 0.0, 100.0, 70.0, "%", step=1.0)
+        self.ring_mix_var = self._add_slider(c1, "Mistura", 0.0, 100.0, 70.0, "%", step=1.0)
 
-        # Distorção & Bitcrusher
-        c2 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c2 = ctk.CTkFrame(scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044")
         c2.pack(fill="x", padx=10, pady=8)
         self.dist_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             c2,
-            text="Distorção & Bitcrusher (Rádio / Mega-fone / Lo-Fi)",
+            text="Distorção & Bitcrusher",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.dist_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
-        ).pack(anchor="w", padx=14, pady=(10, 2))
-        ctk.CTkLabel(
-            c2,
-            text="Adiciona saturação analógica, redução de bits (8-bit/rádio) e redução de taxa de amostragem.",
-            font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
-        ).pack(anchor="w", padx=14, pady=(0, 8))
+        ).pack(anchor="w", padx=16, pady=(12, 8))
 
         self.dist_drive_var = self._add_slider(c2, "Drive / Saturação", 1.0, 25.0, 3.0, "x", step=0.2)
-        self.dist_bits_var = self._add_slider(c2, "Resolução (Bits)", 4.0, 16.0, 16.0, "bits", step=1.0)
-        self.dist_down_var = self._add_slider(c2, "Downsample (Lo-Fi)", 1.0, 16.0, 1.0, "x", step=1.0)
-        self.dist_mix_var = self._add_slider(c2, "Mistura (Mix)", 0.0, 100.0, 70.0, "%", step=1.0)
+        self.dist_bits_var = self._add_slider(c2, "Resolução", 4.0, 16.0, 16.0, "bits", step=1.0)
+        self.dist_down_var = self._add_slider(c2, "Downsample", 1.0, 16.0, 1.0, "x", step=1.0)
+        self.dist_mix_var = self._add_slider(c2, "Mistura", 0.0, 100.0, 70.0, "%", step=1.0)
 
     def _build_space_tab(self, tab):
         scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
 
-        # Eco / Delay
-        c1 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c1 = ctk.CTkFrame(scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044")
         c1.pack(fill="x", padx=10, pady=8)
         self.echo_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             c1,
-            text="Eco / Delay (estilo 'Eco' do Audacity)",
+            text="Eco / Delay",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.echo_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
-        ).pack(anchor="w", padx=14, pady=(10, 2))
-        ctk.CTkLabel(
-            c1,
-            text="Dica: Use atrasos curtos (10–25 ms) com feedback alto para som de Capacete/Tubo metálico, ou 250–500 ms para Eco de Caverna.",
-            font=ctk.CTkFont(size=11),
-            text_color="#94a3b8",
-        ).pack(anchor="w", padx=14, pady=(0, 8))
+        ).pack(anchor="w", padx=16, pady=(12, 8))
 
-        self.echo_delay_var = self._add_slider(c1, "Tempo de Atraso", 10.0, 700.0, 220.0, "ms", step=2.0)
-        self.echo_fb_var = self._add_slider(c1, "Repetições (Feedback)", 0.0, 85.0, 35.0, "%", step=1.0)
+        self.echo_delay_var = self._add_slider(c1, "Atraso", 10.0, 700.0, 220.0, "ms", step=2.0)
+        self.echo_fb_var = self._add_slider(c1, "Feedback", 0.0, 85.0, 35.0, "%", step=1.0)
         self.echo_mix_var = self._add_slider(c1, "Volume do Eco", 0.0, 100.0, 35.0, "%", step=1.0)
 
-        # Reverb
-        c2 = ctk.CTkFrame(scroll, fg_color="#0f172a", corner_radius=10)
+        c2 = ctk.CTkFrame(scroll, fg_color="#161f30", corner_radius=12, border_width=1, border_color="#233044")
         c2.pack(fill="x", padx=10, pady=8)
         self.rev_en_var = ctk.BooleanVar(value=False)
         ctk.CTkSwitch(
             c2,
-            text="Reverberação (Reverb de Sala / Catedral)",
+            text="Reverb",
             font=ctk.CTkFont(size=15, weight="bold"),
             variable=self.rev_en_var,
+            fg_color="#243247",
+            progress_color="#38bdf8",
             command=self._on_param_change,
-        ).pack(anchor="w", padx=14, pady=(10, 2))
+        ).pack(anchor="w", padx=16, pady=(12, 8))
         self.rev_room_var = self._add_slider(c2, "Tamanho da Sala", 0.0, 100.0, 60.0, "%", step=1.0)
-        self.rev_damp_var = self._add_slider(c2, "Abafamento (Damping)", 5.0, 92.0, 45.0, "%", step=1.0)
-        self.rev_mix_var = self._add_slider(c2, "Mistura do Reverb", 0.0, 100.0, 30.0, "%", step=1.0)
+        self.rev_damp_var = self._add_slider(c2, "Abafamento", 5.0, 92.0, 45.0, "%", step=1.0)
+        self.rev_mix_var = self._add_slider(c2, "Mistura", 0.0, 100.0, 30.0, "%", step=1.0)
 
     def _build_mixer_tab(self, tab):
-        box = ctk.CTkScrollableFrame(tab, fg_color="#0f172a", corner_radius=10)
-        box.pack(fill="both", expand=True, padx=10, pady=8)
+        box = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+        box.pack(fill="both", expand=True, padx=6, pady=6)
 
         ctk.CTkLabel(
             box,
-            text="Visão Rápida da Cadeia de Efeitos (Ligue/Desligue módulos instantaneamente)",
+            text="Cadeia de Efeitos",
             font=ctk.CTkFont(size=15, weight="bold"),
-        ).pack(anchor="w", padx=16, pady=(12, 10))
+            text_color="#e2e8f0",
+        ).pack(anchor="w", padx=12, pady=(8, 8))
 
         modules = [
-            ("Noise Gate (Corte de ruído)", self.gate_en_var),
-            ("Compressor de Voz", self.comp_en_var),
-            ("Alterar Tom (Pitch Shifter)", self.pitch_en_var),
-            ("Frequency Shifter (Hz)", self.fshift_en_var),
-            ("Vocoder (12 Bandas Synth)", self.voc_en_var),
-            ("Equalizador (EQ 5 Bandas + Cortes)", self.eq_en_var),
-            ("Phaser (Audacity)", self.phaser_en_var),
-            ("Wahwah (Audacity)", self.wah_en_var),
+            ("Noise Gate", self.gate_en_var),
+            ("Compressor", self.comp_en_var),
+            ("Alterar Tom (Pitch)", self.pitch_en_var),
+            ("Frequency Shifter", self.fshift_en_var),
+            ("Vocoder", self.voc_en_var),
+            ("Equalizador", self.eq_en_var),
+            ("Phaser", self.phaser_en_var),
+            ("Wah-Wah", self.wah_en_var),
             ("Chorus & Flanger", self.chorus_en_var),
-            ("Tremolo (Audacity)", self.trem_en_var),
-            ("Modulador em Anel (Robô)", self.ring_en_var),
-            ("Distorção & Bitcrusher (Rádio/Lo-Fi)", self.dist_en_var),
+            ("Tremolo", self.trem_en_var),
+            ("Ring Modulator", self.ring_en_var),
+            ("Distorção & Bitcrusher", self.dist_en_var),
             ("Eco / Delay", self.echo_en_var),
-            ("Reverberação (Reverb)", self.rev_en_var),
+            ("Reverb", self.rev_en_var),
         ]
 
         grid = ctk.CTkFrame(box, fg_color="transparent")
-        grid.pack(fill="x", padx=16, pady=6)
+        grid.pack(fill="x", padx=8, pady=4)
         grid.columnconfigure(0, weight=1)
         grid.columnconfigure(1, weight=1)
         for idx, (label, var) in enumerate(modules):
-            card = ctk.CTkFrame(grid, fg_color="#161f33", corner_radius=8)
+            card = ctk.CTkFrame(
+                grid, fg_color="#161f30", corner_radius=10, border_width=1, border_color="#233044"
+            )
             card.grid(row=idx // 2, column=idx % 2, sticky="ew", padx=6, pady=6)
             ctk.CTkSwitch(
-                card, text=label, variable=var, font=ctk.CTkFont(size=13), command=self._on_param_change
+                card,
+                text=label,
+                variable=var,
+                font=ctk.CTkFont(size=13),
+                fg_color="#243247",
+                progress_color="#38bdf8",
+                command=self._on_param_change,
             ).pack(anchor="w", padx=14, pady=12)
 
         ctk.CTkButton(
             box,
-            text="Resetar Todos os Efeitos (Voz Limpa)",
-            fg_color="#dc2626",
-            hover_color="#b91c1c",
-            height=36,
+            text="Resetar Efeitos",
+            fg_color="#1e293b",
+            hover_color="#dc2626",
+            border_width=1,
+            border_color="#334155",
+            corner_radius=8,
+            height=34,
             command=lambda: self._apply_preset("Normal (Limpo + Gate)"),
-        ).pack(pady=18)
+        ).pack(pady=16)
 
     # ------------------------------------------------------------------ #
     # Helpers de Widgets
     # ------------------------------------------------------------------ #
     def _add_slider(self, parent, label: str, vmin: float, vmax: float, default: float, unit: str, step: float = 0.5):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x", padx=12, pady=3)
+        frame.pack(fill="x", padx=14, pady=4)
 
         top = ctk.CTkFrame(frame, fg_color="transparent")
         top.pack(fill="x")
-        ctk.CTkLabel(top, text=label, font=ctk.CTkFont(size=12)).pack(side="left")
+        ctk.CTkLabel(top, text=label, font=ctk.CTkFont(size=12), text_color="#cbd5e1").pack(side="left")
         val_lbl = ctk.CTkLabel(top, text=f"{default:.1f} {unit}", font=ctk.CTkFont(size=12, weight="bold"), text_color="#38bdf8")
         val_lbl.pack(side="right")
 
@@ -1233,15 +1361,27 @@ class VoxCraftApp(ctk.CTk):
                 val_lbl.configure(text=f"{float(v):.1f} {unit}")
             self._on_param_change()
 
-        slider = ctk.CTkSlider(frame, from_=vmin, to=vmax, number_of_steps=steps, variable=var, command=on_slide)
-        slider.pack(fill="x", pady=(1, 3))
+        slider = ctk.CTkSlider(
+            frame,
+            from_=vmin,
+            to=vmax,
+            number_of_steps=steps,
+            height=16,
+            fg_color="#243247",
+            progress_color="#0284c7",
+            button_color="#38bdf8",
+            button_hover_color="#7dd3fc",
+            variable=var,
+            command=on_slide,
+        )
+        slider.pack(fill="x", pady=(2, 4))
         var._val_lbl = val_lbl
         var._unit = unit
         var._step = step
         return var
 
     def _add_vertical_eq_band(self, parent, title: str):
-        col = ctk.CTkFrame(parent, fg_color="#161f33", corner_radius=8)
+        col = ctk.CTkFrame(parent, fg_color="#1b263b", corner_radius=10)
         col.pack(side="left", fill="both", expand=True, padx=4)
 
         val_lbl = ctk.CTkLabel(col, text="0.0 dB", font=ctk.CTkFont(size=11, weight="bold"), text_color="#38bdf8")
@@ -1260,12 +1400,16 @@ class VoxCraftApp(ctk.CTk):
             number_of_steps=72,
             orientation="vertical",
             height=150,
+            fg_color="#243247",
+            progress_color="#0284c7",
+            button_color="#38bdf8",
+            button_hover_color="#7dd3fc",
             variable=var,
             command=on_slide,
         )
         slider.pack(pady=4)
 
-        ctk.CTkLabel(col, text=title, font=ctk.CTkFont(size=11), justify="center").pack(pady=(2, 8))
+        ctk.CTkLabel(col, text=title, font=ctk.CTkFont(size=11), text_color="#94a3b8", justify="center").pack(pady=(2, 8))
         var._val_lbl = val_lbl
         var._unit = "dB"
         var._step = 0.5
@@ -1736,8 +1880,8 @@ class VoxCraftApp(ctk.CTk):
     def _toggle_audio(self):
         if self.router.running:
             self.router.stop()
-            self.power_btn.configure(text="INICIAR ÁUDIO", fg_color="#10b981", hover_color="#059669")
-            self.status_lbl.configure(text="Status: Parado", text_color="#94a3b8")
+            self.power_btn.configure(text="Iniciar Áudio", fg_color="#059669", hover_color="#10b981")
+            self.status_lbl.configure(text="Parado", text_color="#94a3b8")
         else:
             self._start_audio()
 
@@ -1758,7 +1902,7 @@ class VoxCraftApp(ctk.CTk):
             monitor_idx=mon_idx,
         )
         if ok:
-            self.power_btn.configure(text="PARAR ÁUDIO", fg_color="#ef4444", hover_color="#dc2626")
+            self.power_btn.configure(text="Parar Áudio", fg_color="#dc2626", hover_color="#ef4444")
             self.status_lbl.configure(text=msg, text_color="#10b981")
             self._draw_eq_curve()
         else:
@@ -1884,7 +2028,7 @@ class VoxCraftApp(ctk.CTk):
             pts = []
             for xv, yv in zip(xs, ys):
                 pts.extend([float(xv), float(yv)])
-            color = "#f59e0b" if self.params.bypass else "#4cc9f0"
+            color = "#f59e0b" if self.params.bypass else "#38bdf8"
             wc.create_line(*pts, fill=color, width=1.6)
         elif force_refresh or not self._last_wave_idle:
             self._last_wave_idle = True
@@ -1976,40 +2120,55 @@ class VoxCraftApp(ctk.CTk):
         win.geometry(f"{w}x{h}+{px}+{py}")
         win.resizable(False, False)
         win.transient(self)
+        win.configure(fg_color="#0f172a")
 
         ctk.CTkLabel(
-            win, text="Atualização do VoxCraft Studio", font=ctk.CTkFont(size=17, weight="bold"), text_color="#4cc9f0"
+            win, text="Atualização do VoxCraft Studio", font=ctk.CTkFont(size=17, weight="bold"), text_color="#38bdf8"
         ).pack(anchor="w", padx=20, pady=(16, 6))
 
         msg_lbl = ctk.CTkLabel(
             win,
-            text="Verificando atualizações (suas entradas, saídas e atalhos estão salvos)...",
+            text="Verificando atualizações...",
             justify="left",
             wraplength=515,
             font=ctk.CTkFont(size=12),
+            text_color="#cbd5e1",
         )
         msg_lbl.pack(anchor="w", padx=20, pady=8)
 
-        progress = ctk.CTkProgressBar(win, mode="indeterminate", width=510)
+        progress = ctk.CTkProgressBar(win, mode="indeterminate", width=510, fg_color="#243247", progress_color="#38bdf8")
         progress.pack(padx=20, pady=(6, 14))
         progress.start()
 
         btn_row = ctk.CTkFrame(win, fg_color="transparent")
         btn_row.pack(fill="x", padx=20, pady=(6, 14))
 
-        action_btn = ctk.CTkButton(btn_row, text="Atualizar Agora", width=185, fg_color="#10b981", state="disabled")
+        action_btn = ctk.CTkButton(btn_row, text="Atualizar Agora", width=185, corner_radius=8, fg_color="#059669", hover_color="#10b981", state="disabled")
         action_btn.pack(side="left")
 
         zip_local_btn = ctk.CTkButton(
             btn_row,
             text="Atualizar de .zip Local",
             width=155,
-            fg_color="#2563eb",
-            hover_color="#1d4ed8",
+            corner_radius=8,
+            fg_color="#1e293b",
+            hover_color="#2563eb",
+            border_width=1,
+            border_color="#334155",
         )
         zip_local_btn.pack(side="left", padx=(10, 0))
 
-        close_btn = ctk.CTkButton(btn_row, text="Fechar", width=95, fg_color="#334155", command=win.destroy)
+        close_btn = ctk.CTkButton(
+            btn_row,
+            text="Fechar",
+            width=95,
+            corner_radius=8,
+            fg_color="#1e293b",
+            hover_color="#334155",
+            border_width=1,
+            border_color="#334155",
+            command=win.destroy,
+        )
         close_btn.pack(side="right")
 
         win.update_idletasks()
@@ -2341,35 +2500,43 @@ class VoxCraftApp(ctk.CTk):
     # ------------------------------------------------------------------ #
     def _open_discord_guide(self):
         win = ctk.CTkToplevel(self)
-        win.title("Como usar no Discord, Valorant, CS2, OBS e Jogos")
-        win.geometry("560x420")
+        win.title("Discord e Jogos")
+        win.geometry("540x400")
+        win.configure(fg_color="#0f172a")
         win.transient(self)
         win.after(120, lambda: win.winfo_exists() and win.grab_set())
 
         txt = (
-            "Para enviar a sua voz modificada para o Discord e qualquer jogo, você precisa de um "
-            "cabo de áudio virtual (gratuito):\n\n"
-            "1. Instale o VB-Audio Virtual Cable (VB-Cable):\n"
-            "   • Baixe em: vb-audio.com/Cable (Windows/macOS) e reinicie se solicitado.\n"
+            "1. Instale o VB-Audio Virtual Cable:\n"
+            "   • vb-audio.com/Cable (Windows/macOS)\n"
             "   • No Linux, use PipeWire/PulseAudio virtual sink.\n\n"
-            "2. Configure aqui no VoxCraft Studio:\n"
-            "   • Microfone (Entrada): Escolha o seu microfone físico.\n"
-            "   • Saída: Escolha 'CABLE Input (VB-Audio Virtual Cable)'.\n"
-            "   • Marque 'Ouvir minha voz' apenas enquanto estiver testando nos seus fones!\n"
-            "   • Clique em INICIAR ÁUDIO.\n\n"
-            "3. Configure no Discord / Jogos:\n"
-            "   • No Discord: Configurações > Voz e Vídeo > Dispositivo de Entrada:\n"
-            "     Selecione 'CABLE Output (VB-Audio Virtual Cable)'.\n"
-            "   • Dica Discord: Desative o 'Supressão de Ruído Krisp' do Discord se ele\n"
-            "     estiver cortando efeitos como Robô, Eco ou Voz Grave."
+            "2. Configure no VoxCraft Studio:\n"
+            "   • Microfone: seu microfone físico.\n"
+            "   • Saída: CABLE Input (VB-Audio Virtual Cable).\n"
+            "   • Ative 'Ouvir minha voz' só para testar nos fones.\n"
+            "   • Clique em Iniciar Áudio.\n\n"
+            "3. Configure no Discord / Jogo:\n"
+            "   • Dispositivo de Entrada: CABLE Output (VB-Audio Virtual Cable).\n"
+            "   • Dica: desative o Krisp no Discord se estiver cortando efeitos."
         )
         ctk.CTkLabel(
-            win, text="Roteamento para Discord e Jogos", font=ctk.CTkFont(size=17, weight="bold"), text_color="#4cc9f0"
-        ).pack(anchor="w", padx=20, pady=(16, 8))
-        ctk.CTkLabel(win, text=txt, justify="left", font=ctk.CTkFont(size=12), wraplength=520).pack(
-            anchor="w", padx=20, pady=4
-        )
-        ctk.CTkButton(win, text="Entendi!", width=120, command=win.destroy).pack(pady=14)
+            win, text="Roteamento para Discord e Jogos", font=ctk.CTkFont(size=17, weight="bold"), text_color="#38bdf8"
+        ).pack(anchor="w", padx=20, pady=(18, 10))
+        ctk.CTkLabel(
+            win, text=txt, justify="left", font=ctk.CTkFont(size=12), text_color="#cbd5e1", wraplength=500
+        ).pack(anchor="w", padx=20, pady=4)
+        ctk.CTkButton(
+            win,
+            text="Entendi",
+            width=120,
+            height=32,
+            corner_radius=8,
+            fg_color="#1e293b",
+            hover_color="#334155",
+            border_width=1,
+            border_color="#334155",
+            command=win.destroy,
+        ).pack(pady=16)
 
     # ------------------------------------------------------------------ #
     # Tecla de Atalho Configurável (Global mesmo em 2º plano / jogos)
@@ -2556,7 +2723,7 @@ class VoxCraftApp(ctk.CTk):
         lbl_key = self._format_hotkey_label(self.hotkey_spec)
         is_normal = bool(self.bypass_var.get())
         state_txt = "Voz Normal (Limpa)" if is_normal else "Efeito Ativo"
-        color = "#f59e0b" if is_normal else "#4cc9f0"
+        color = "#f59e0b" if is_normal else "#38bdf8"
         if not self.hotkey_en_var.get():
             self.hotkey_hint_lbl.configure(text=f"● {state_txt} (Atalho desativado)", text_color="#94a3b8")
         elif self.hotkey_hold_var.get():
