@@ -90,6 +90,7 @@ class VoxCraftApp(ctk.CTk):
         self._apply_preset("Normal (Limpo + Gate)")
         self._start_tray_icon()
         self._schedule_ui_loop()
+        self.after(250, self._apply_window_icon)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -191,7 +192,7 @@ class VoxCraftApp(ctk.CTk):
 
         # Controles de Preset no Topo
         preset_box = ctk.CTkFrame(topbar, fg_color="transparent")
-        preset_box.pack(side="left", padx=20)
+        preset_box.pack(side="left", padx=12)
         ctk.CTkLabel(preset_box, text="Voz / Preset:", font=ctk.CTkFont(size=12, weight="bold")).pack(
             side="left", padx=(0, 6)
         )
@@ -200,27 +201,27 @@ class VoxCraftApp(ctk.CTk):
             preset_box,
             variable=self.preset_var,
             values=self._all_preset_names(),
-            width=230,
+            width=215,
             command=self._on_preset_selected,
         )
         self.preset_menu.pack(side="left", padx=4)
 
         ctk.CTkButton(
-            preset_box, text="Salvar Voz", width=95, fg_color="#2563eb", command=self._save_custom_preset
+            preset_box, text="Salvar Voz", width=90, fg_color="#2563eb", command=self._save_custom_preset
         ).pack(side="left", padx=4)
         ctk.CTkButton(
-            preset_box, text="Excluir", width=70, fg_color="#475569", hover_color="#dc2626",
+            preset_box, text="Excluir", width=65, fg_color="#475569", hover_color="#dc2626",
             command=self._delete_custom_preset
         ).pack(side="left", padx=4)
 
         # Botões da Direita (Guia, Bypass, Ligar)
         right_top = ctk.CTkFrame(topbar, fg_color="transparent")
-        right_top.pack(side="right", padx=12)
+        right_top.pack(side="right", padx=10)
 
         ctk.CTkButton(
-            right_top, text="Guia Discord / Jogos", width=145, fg_color="#334155",
+            right_top, text="Guia Discord / Jogos", width=140, fg_color="#334155",
             hover_color="#475569", command=self._open_discord_guide
-        ).pack(side="left", padx=6)
+        ).pack(side="left", padx=5)
 
         self.bypass_var = ctk.BooleanVar(value=False)
         self.bypass_btn = ctk.CTkSwitch(
@@ -230,12 +231,12 @@ class VoxCraftApp(ctk.CTk):
             progress_color="#f59e0b",
             command=self._on_param_change,
         )
-        self.bypass_btn.pack(side="left", padx=10)
+        self.bypass_btn.pack(side="left", padx=8)
 
         self.power_btn = ctk.CTkButton(
             right_top,
             text="INICIAR ÁUDIO",
-            width=145,
+            width=155,
             height=38,
             font=ctk.CTkFont(size=13, weight="bold"),
             fg_color="#10b981",
