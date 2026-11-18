@@ -2911,6 +2911,20 @@ class VoxCraftApp(ctk.CTk):
         win.transient(self)
         win.configure(fg_color=th["modal_bg"])
 
+        def _close_settings():
+            self._settings_win = None
+            self._refresh_settings_modal = None
+            try:
+                win.grab_release()
+            except Exception:
+                pass
+            try:
+                win.destroy()
+            except Exception:
+                pass
+
+        win.protocol("WM_DELETE_WINDOW", _close_settings)
+
         title_lbl = ctk.CTkLabel(
             win,
             text=self._t("settings_title"),
@@ -2951,18 +2965,18 @@ class VoxCraftApp(ctk.CTk):
                 return
             new_theme = theme_label_to_key.get(choice, "dark")
             if new_theme != self.ui_theme:
-                self._apply_theme_and_language(new_theme, self.ui_lang)
+                self.after(15, lambda nt=new_theme: self._apply_theme_and_language(nt, self.ui_lang))
 
         theme_seg = ctk.CTkSegmentedButton(
             theme_card,
             variable=theme_var,
             values=[lbl for _, lbl in theme_options],
             fg_color=th["tab_bg"],
-            selected_color=th["accent_deep"],
-            selected_hover_color=th["accent"],
+            selected_color=th["seg_selected"],
+            selected_hover_color=th["seg_selected_hover"],
             unselected_color=th["control_bg"],
             unselected_hover_color=th["control_hover"],
-            text_color=th["text_primary"],
+            text_color=th["seg_text"],
             height=32,
             command=on_theme_change,
         )
@@ -2989,18 +3003,18 @@ class VoxCraftApp(ctk.CTk):
                 return
             new_lang = lang_label_to_code.get(choice, "pt")
             if new_lang != self.ui_lang:
-                self._apply_theme_and_language(self.ui_theme, new_lang)
+                self.after(15, lambda nl=new_lang: self._apply_theme_and_language(self.ui_theme, nl))
 
         lang_seg = ctk.CTkSegmentedButton(
             lang_card,
             variable=lang_var,
             values=[LANGUAGE_LABELS[code] for code in LANGUAGES],
             fg_color=th["tab_bg"],
-            selected_color=th["accent_deep"],
-            selected_hover_color=th["accent"],
+            selected_color=th["seg_selected"],
+            selected_hover_color=th["seg_selected_hover"],
             unselected_color=th["control_bg"],
             unselected_hover_color=th["control_hover"],
-            text_color=th["text_primary"],
+            text_color=th["seg_text"],
             height=32,
             command=on_lang_change,
         )
@@ -3017,11 +3031,11 @@ class VoxCraftApp(ctk.CTk):
             text_color=th["text_primary"],
             border_width=1,
             border_color=th["control_border"],
-            command=win.destroy,
+            command=_close_settings,
         )
         close_btn.pack(pady=(2, 12))
 
-        def _refresh_modal():
+        def _refresh_modal(lang_changed: bool = True):
             nonlocal updating_modal, theme_options, theme_label_to_key
             if not win.winfo_exists():
                 return
@@ -3036,26 +3050,28 @@ class VoxCraftApp(ctk.CTk):
                 theme_options = _get_theme_options()
                 theme_label_to_key = {lbl: key for key, lbl in theme_options}
                 cur_lbl = next((lbl for key, lbl in theme_options if key == self.ui_theme), self._t("theme_dark"))
-                theme_seg.configure(
-                    values=[lbl for _, lbl in theme_options],
-                    fg_color=t_now["tab_bg"],
-                    selected_color=t_now["accent_deep"],
-                    selected_hover_color=t_now["accent"],
-                    unselected_color=t_now["control_bg"],
-                    unselected_hover_color=t_now["control_hover"],
-                    text_color=t_now["text_primary"],
-                )
+                seg_kw = {
+                    "fg_color": t_now["tab_bg"],
+                    "selected_color": t_now["seg_selected"],
+                    "selected_hover_color": t_now["seg_selected_hover"],
+                    "unselected_color": t_now["control_bg"],
+                    "unselected_hover_color": t_now["control_hover"],
+                    "text_color": t_now["seg_text"],
+                }
+                if lang_changed:
+                    seg_kw["values"] = [lbl for _, lbl in theme_options]
+                theme_seg.configure(**seg_kw)
                 theme_var.set(cur_lbl)
 
                 lang_card.configure(fg_color=t_now["card_bg"], border_color=t_now["card_border"])
                 lang_lbl.configure(text=self._t("language_label"), text_color=t_now["text_primary"])
                 lang_seg.configure(
                     fg_color=t_now["tab_bg"],
-                    selected_color=t_now["accent_deep"],
-                    selected_hover_color=t_now["accent"],
+                    selected_color=t_now["seg_selected"],
+                    selected_hover_color=t_now["seg_selected_hover"],
                     unselected_color=t_now["control_bg"],
                     unselected_hover_color=t_now["control_hover"],
-                    text_color=t_now["text_primary"],
+                    text_color=t_now["seg_text"],
                 )
                 lang_var.set(LANGUAGE_LABELS.get(self.ui_lang, "Português"))
 
@@ -3071,7 +3087,7 @@ class VoxCraftApp(ctk.CTk):
 
         self._refresh_settings_modal = _refresh_modal
         win.lift()
-        win.after(80, lambda: win.winfo_exists() and win.grab_set())
+        win.after(40, lambda: win.winfo_exists() and (win.lift(), win.focus_force()))
 
     def _apply_theme_and_language(self, new_theme: str, new_lang: str):
         if new_theme not in ("dark", "oled", "light"):
@@ -3097,7 +3113,12 @@ class VoxCraftApp(ctk.CTk):
         if settings_win is not None and refresh_fn is not None:
             try:
                 if settings_win.winfo_exists():
-                    refresh_fn()
+                    refresh_fn(lang_changed=lang_changed)
+                    if theme_changed and self._c()["ctk_mode"] != old_ctk_mode:
+                        self.after(
+                            25,
+                            lambda w=settings_win: w.winfo_exists() and (w.deiconify(), w.lift(), w.focus_force()),
+                        )
             except Exception:
                 pass
 
@@ -3159,6 +3180,12 @@ class VoxCraftApp(ctk.CTk):
     def _apply_theme_in_place(self, old_ctk_mode: str):
         th = self._c()
         if th["ctk_mode"] != old_ctk_mode:
+            try:
+                cur_grab = self.grab_current()
+                if cur_grab is not None:
+                    cur_grab.grab_release()
+            except Exception:
+                pass
             ctk.set_appearance_mode(th["ctk_mode"])
         self.configure(fg_color=th["window_bg"])
 

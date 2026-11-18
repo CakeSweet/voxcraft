@@ -46,6 +46,8 @@ THEMES: dict[str, dict[str, str]] = {
         "switch_knob": "#e2e8f0",
         "switch_knob_hover": "#ffffff",
         "seg_text": "#e2e8f0",
+        "seg_selected": "#0284c7",
+        "seg_selected_hover": "#38bdf8",
     },
     "oled": {
         "ctk_mode": "dark",
@@ -84,6 +86,8 @@ THEMES: dict[str, dict[str, str]] = {
         "switch_knob": "#f1f5f9",
         "switch_knob_hover": "#ffffff",
         "seg_text": "#f1f5f9",
+        "seg_selected": "#0284c7",
+        "seg_selected_hover": "#38bdf8",
     },
     "light": {
         "ctk_mode": "light",
@@ -122,6 +126,8 @@ THEMES: dict[str, dict[str, str]] = {
         "switch_knob": "#ffffff",
         "switch_knob_hover": "#f8fafc",
         "seg_text": "#0f172a",
+        "seg_selected": "#7dd3fc",
+        "seg_selected_hover": "#38bdf8",
     },
 }
 
