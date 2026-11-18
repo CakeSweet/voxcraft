@@ -26,6 +26,11 @@ try:
 except ImportError:
     pystray = None
 
+try:
+    from pynput import keyboard as pynput_kb
+except ImportError:
+    pynput_kb = None
+
 from dsp_engine import DSPParams, RealTimeDSPEngine, build_eq_sos
 from presets import (
     get_builtin_presets,
@@ -100,6 +105,16 @@ class VoxCraftApp(ctk.CTk):
         self.out_devices: list[AudioDeviceItem] = []
         self._syncing_ui = False
 
+        # Atalho Global (Efeito <-> Voz Normal)
+        self.hotkey_spec: str = "f9"
+        self._hotkey_lock = threading.Lock()
+        self._pressed_keys: set[str] = set()
+        self._hotkey_is_down = False
+        self._hold_base_bypass: bool | None = None
+        self._capturing_hotkey = False
+        self._capture_mods: set[str] = set()
+        self._kb_listener = None
+
         self._build_layout()
         self._restore_saved_ui_prefs()
         self._refresh_devices(reinit_backend=False, initial_load=True)
@@ -134,6 +149,7 @@ class VoxCraftApp(ctk.CTk):
                 self.after(450, self._start_audio)
 
         self._start_tray_icon()
+        self._start_hotkey_listener()
         self._schedule_ui_loop()
         self.after(250, self._apply_window_icon)
 
@@ -378,6 +394,54 @@ class VoxCraftApp(ctk.CTk):
             side, text="Status: Parado", font=ctk.CTkFont(size=11), text_color="#94a3b8", wraplength=280
         )
         self.status_lbl.pack(anchor="w", padx=10, pady=(0, 8))
+
+        # Card: Tecla de Atalho (Alternar Efeito <-> Voz Normal)
+        hk_card = ctk.CTkFrame(side, fg_color="#0f172a", corner_radius=8)
+        hk_card.pack(fill="x", padx=10, pady=6)
+
+        ctk.CTkLabel(hk_card, text="Atalho (Efeito ↔ Normal)", font=ctk.CTkFont(size=12, weight="bold")).pack(
+            anchor="w", padx=10, pady=(6, 4)
+        )
+
+        self.hotkey_en_var = ctk.BooleanVar(value=True)
+        ctk.CTkSwitch(
+            hk_card,
+            text="Ativar tecla de atalho",
+            variable=self.hotkey_en_var,
+            command=self._on_hotkey_setting_changed,
+        ).pack(anchor="w", padx=10, pady=(0, 6))
+
+        hk_row = ctk.CTkFrame(hk_card, fg_color="transparent")
+        hk_row.pack(fill="x", padx=10, pady=(0, 6))
+        ctk.CTkLabel(hk_row, text="Tecla:", font=ctk.CTkFont(size=12)).pack(side="left")
+        self.hotkey_btn = ctk.CTkButton(
+            hk_row,
+            text="F9",
+            height=28,
+            fg_color="#1e293b",
+            hover_color="#334155",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._toggle_hotkey_capture,
+        )
+        self.hotkey_btn.pack(side="left", fill="x", expand=True, padx=(8, 4))
+
+        self.hotkey_hold_var = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            hk_card,
+            text="Manter segurando (Segurar tecla)",
+            variable=self.hotkey_hold_var,
+            command=self._on_hotkey_setting_changed,
+        ).pack(anchor="w", padx=10, pady=(2, 4))
+
+        self.hotkey_hint_lbl = ctk.CTkLabel(
+            hk_card,
+            text="● Modo: Efeito Ativo (Pressione F9)",
+            font=ctk.CTkFont(size=11),
+            text_color="#4cc9f0",
+            wraplength=265,
+            justify="left",
+        )
+        self.hotkey_hint_lbl.pack(anchor="w", padx=10, pady=(0, 8))
 
         # Medidores ao vivo + Osciloscópio
         meter_card = ctk.CTkFrame(side, fg_color="#0f172a", corner_radius=8)
@@ -1042,6 +1106,7 @@ class VoxCraftApp(ctk.CTk):
         )
         self.params = p
         self.dsp.update_params(p)
+        self._update_hotkey_hint()
         self._draw_eq_curve()
 
     def _load_params_to_ui(self, p: DSPParams):
@@ -1234,6 +1299,14 @@ class VoxCraftApp(ctk.CTk):
             self.latency_var.set(saved_lat)
         if "minimize_to_tray" in cfg and pystray is not None:
             self.minimize_to_tray_var.set(bool(cfg["minimize_to_tray"]))
+        if "hotkey_enabled" in cfg:
+            self.hotkey_en_var.set(bool(cfg["hotkey_enabled"]))
+        if isinstance(cfg.get("hotkey_spec"), str) and cfg["hotkey_spec"].strip():
+            self.hotkey_spec = cfg["hotkey_spec"].strip().lower()
+        if "hotkey_hold_mode" in cfg:
+            self.hotkey_hold_var.set(bool(cfg["hotkey_hold_mode"]))
+        self.hotkey_btn.configure(text=self._format_hotkey_label(self.hotkey_spec))
+        self._update_hotkey_hint()
 
     @staticmethod
     def _device_to_dict(item: AudioDeviceItem | None) -> dict | None:
@@ -1260,6 +1333,9 @@ class VoxCraftApp(ctk.CTk):
         self.app_config["monitor_enabled"] = bool(self.monitor_var.get())
         self.app_config["latency"] = str(self.latency_var.get())
         self.app_config["minimize_to_tray"] = bool(self.minimize_to_tray_var.get())
+        self.app_config["hotkey_enabled"] = bool(self.hotkey_en_var.get())
+        self.app_config["hotkey_spec"] = str(self.hotkey_spec)
+        self.app_config["hotkey_hold_mode"] = bool(self.hotkey_hold_var.get())
         if include_params:
             self.app_config["current_params"] = asdict(self.params)
         save_app_config(self.app_config)
@@ -1737,6 +1813,318 @@ class VoxCraftApp(ctk.CTk):
         )
         ctk.CTkButton(win, text="Entendi!", width=120, command=win.destroy).pack(pady=14)
 
+    # ------------------------------------------------------------------ #
+    # Tecla de Atalho Configurável (Alternar ou Manter Segurando)
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _format_hotkey_label(spec: str) -> str:
+        if not spec:
+            return "Definir Tecla"
+        nice = {
+            "ctrl": "Ctrl",
+            "ctrl_l": "Ctrl Esq",
+            "ctrl_r": "Ctrl Dir",
+            "shift": "Shift",
+            "shift_l": "Shift Esq",
+            "shift_r": "Shift Dir",
+            "alt": "Alt",
+            "alt_l": "Alt Esq",
+            "alt_r": "Alt Dir",
+            "alt_gr": "AltGr",
+            "caps_lock": "Caps Lock",
+            "space": "Espaço",
+            "tab": "Tab",
+            "enter": "Enter",
+            "backspace": "Backspace",
+            "insert": "Insert",
+            "delete": "Delete",
+            "home": "Home",
+            "end": "End",
+            "page_up": "Page Up",
+            "page_down": "Page Down",
+            "pause": "Pause",
+            "scroll_lock": "Scroll Lock",
+            "print_screen": "Print Screen",
+            "up": "↑",
+            "down": "↓",
+            "left": "←",
+            "right": "→",
+        }
+        parts = [nice.get(p, p.upper()) for p in spec.split("+") if p]
+        return " + ".join(parts) if parts else "Definir Tecla"
+
+    @staticmethod
+    def _normalize_tk_keysym(keysym: str) -> str | None:
+        if not keysym:
+            return None
+        low = keysym.lower()
+        mapping = {
+            "control_l": "ctrl_l",
+            "control_r": "ctrl_r",
+            "shift_l": "shift_l",
+            "shift_r": "shift_r",
+            "alt_l": "alt_l",
+            "alt_r": "alt_r",
+            "iso_level3_shift": "alt_gr",
+            "caps_lock": "caps_lock",
+            "return": "enter",
+            "kp_enter": "enter",
+            "prior": "page_up",
+            "next": "page_down",
+            "print": "print_screen",
+            "break": "pause",
+        }
+        if low in mapping:
+            return mapping[low]
+        if low in {
+            "space", "tab", "backspace", "insert", "delete", "home", "end",
+            "pause", "scroll_lock", "up", "down", "left", "right",
+        }:
+            return low
+        if low.startswith("f") and low[1:].isdigit():
+            num = int(low[1:])
+            if 1 <= num <= 24:
+                return low
+        if len(keysym) == 1 and keysym.isprintable():
+            return keysym.lower()
+        return None
+
+    @staticmethod
+    def _normalize_pynput_key(key) -> str | None:
+        if pynput_kb is None:
+            return None
+        if isinstance(key, pynput_kb.Key):
+            name = str(key.name).lower()
+            if name == "return":
+                return "enter"
+            return name
+        vk = getattr(key, "vk", None)
+        if isinstance(vk, int):
+            if 65 <= vk <= 90:
+                return chr(vk).lower()
+            if 48 <= vk <= 57:
+                return chr(vk)
+            if 112 <= vk <= 135:
+                return f"f{vk - 111}"
+            if vk == 32:
+                return "space"
+        ch = getattr(key, "char", None)
+        if isinstance(ch, str) and len(ch) == 1 and ord(ch) >= 32:
+            return ch.lower()
+        return None
+
+    @staticmethod
+    def _hotkey_matches(spec: str, pressed: set[str]) -> bool:
+        if not spec:
+            return False
+        tokens = [t for t in spec.split("+") if t]
+        if not tokens:
+            return False
+        for tok in tokens:
+            if tok == "ctrl":
+                if not (pressed & {"ctrl", "ctrl_l", "ctrl_r"}):
+                    return False
+            elif tok == "shift":
+                if not (pressed & {"shift", "shift_l", "shift_r"}):
+                    return False
+            elif tok == "alt":
+                if not (pressed & {"alt", "alt_l", "alt_r", "alt_gr"}):
+                    return False
+            elif tok not in pressed:
+                return False
+        return True
+
+    def _update_hotkey_hint(self):
+        if not hasattr(self, "hotkey_hint_lbl"):
+            return
+        lbl_key = self._format_hotkey_label(self.hotkey_spec)
+        is_normal = bool(self.bypass_var.get())
+        state_txt = "Voz Normal (Limpa)" if is_normal else "Efeito Ativo"
+        color = "#f59e0b" if is_normal else "#4cc9f0"
+        if not self.hotkey_en_var.get():
+            self.hotkey_hint_lbl.configure(text=f"● {state_txt} (Atalho desativado)", text_color="#94a3b8")
+        elif self.hotkey_hold_var.get():
+            hint_scope = "" if pynput_kb is not None else " (na janela)"
+            self.hotkey_hint_lbl.configure(
+                text=f"● {state_txt} | Segure {lbl_key}{hint_scope}",
+                text_color=color,
+            )
+        else:
+            hint_scope = "" if pynput_kb is not None else " (na janela)"
+            self.hotkey_hint_lbl.configure(
+                text=f"● {state_txt} | Pressione {lbl_key}{hint_scope}",
+                text_color=color,
+            )
+
+    def _on_hotkey_setting_changed(self):
+        with self._hotkey_lock:
+            self._hotkey_is_down = False
+            self._hold_base_bypass = None
+        self._update_hotkey_hint()
+        self._save_config()
+
+    def _toggle_hotkey_capture(self):
+        if self._capturing_hotkey:
+            self._stop_hotkey_capture(cancelled=True)
+            return
+        self._capturing_hotkey = True
+        self._capture_mods.clear()
+        with self._hotkey_lock:
+            self._hotkey_is_down = False
+            self._hold_base_bypass = None
+        self.hotkey_btn.configure(text="Pressione a tecla... (Esc)", fg_color="#d97706", hover_color="#b45309")
+        self.focus_force()
+        self._cap_press_id = self.bind("<KeyPress>", self._on_capture_keypress, add="+")
+        self._cap_release_id = self.bind("<KeyRelease>", self._on_capture_keyrelease, add="+")
+
+    def _stop_hotkey_capture(self, cancelled: bool = False):
+        self._capturing_hotkey = False
+        self._capture_mods.clear()
+        try:
+            if hasattr(self, "_cap_press_id"):
+                self.unbind("<KeyPress>", self._cap_press_id)
+            if hasattr(self, "_cap_release_id"):
+                self.unbind("<KeyRelease>", self._cap_release_id)
+        except Exception:
+            pass
+        self.hotkey_btn.configure(
+            text=self._format_hotkey_label(self.hotkey_spec),
+            fg_color="#1e293b",
+            hover_color="#334155",
+        )
+        self._update_hotkey_hint()
+        if not cancelled:
+            self._save_config()
+
+    def _on_capture_keypress(self, event):
+        if not self._capturing_hotkey:
+            return
+        if str(event.keysym).lower() == "escape":
+            self._stop_hotkey_capture(cancelled=True)
+            return "break"
+        tok = self._normalize_tk_keysym(event.keysym)
+        if not tok:
+            return "break"
+        mod_tokens = {"ctrl_l", "ctrl_r", "shift_l", "shift_r", "alt_l", "alt_r", "alt_gr"}
+        if tok in mod_tokens:
+            self._capture_mods.add(tok)
+            return "break"
+
+        parts = []
+        if self._capture_mods & {"ctrl_l", "ctrl_r"}:
+            parts.append("ctrl")
+        if self._capture_mods & {"alt_l", "alt_r", "alt_gr"}:
+            parts.append("alt")
+        if self._capture_mods & {"shift_l", "shift_r"}:
+            parts.append("shift")
+        parts.append(tok)
+        self.hotkey_spec = "+".join(parts)
+        self._stop_hotkey_capture(cancelled=False)
+        return "break"
+
+    def _on_capture_keyrelease(self, event):
+        if not self._capturing_hotkey:
+            return
+        tok = self._normalize_tk_keysym(event.keysym)
+        if tok and tok in self._capture_mods:
+            self.hotkey_spec = tok
+            self._stop_hotkey_capture(cancelled=False)
+            return "break"
+
+    def _start_hotkey_listener(self):
+        if pynput_kb is not None:
+            def on_press(key):
+                if self._is_quitting or self._capturing_hotkey or not self.hotkey_en_var.get():
+                    return
+                tok = self._normalize_pynput_key(key)
+                if not tok:
+                    return
+                with self._hotkey_lock:
+                    self._pressed_keys.add(tok)
+                    matched = self._hotkey_matches(self.hotkey_spec, self._pressed_keys)
+                    if matched and not self._hotkey_is_down:
+                        self._hotkey_is_down = True
+                        hold = bool(self.hotkey_hold_var.get())
+                        if hold:
+                            self.after(0, self._on_hotkey_hold_down)
+                        else:
+                            self.after(0, self._on_hotkey_toggle)
+
+            def on_release(key):
+                tok = self._normalize_pynput_key(key)
+                if not tok:
+                    return
+                with self._hotkey_lock:
+                    self._pressed_keys.discard(tok)
+                    if self._hotkey_is_down and not self._hotkey_matches(self.hotkey_spec, self._pressed_keys):
+                        self._hotkey_is_down = False
+                        if self.hotkey_hold_var.get() and not self._capturing_hotkey and self.hotkey_en_var.get():
+                            self.after(0, self._on_hotkey_hold_up)
+
+            try:
+                self._kb_listener = pynput_kb.Listener(on_press=on_press, on_release=on_release)
+                self._kb_listener.daemon = True
+                self._kb_listener.start()
+                return
+            except Exception:
+                self._kb_listener = None
+
+        # Fallback dentro da janela caso pynput não esteja instalado
+        self.bind("<KeyPress>", self._on_tk_fallback_keypress, add="+")
+        self.bind("<KeyRelease>", self._on_tk_fallback_keyrelease, add="+")
+
+    def _stop_hotkey_listener(self):
+        if self._kb_listener is not None:
+            try:
+                self._kb_listener.stop()
+            except Exception:
+                pass
+            self._kb_listener = None
+
+    def _on_tk_fallback_keypress(self, event):
+        if self._capturing_hotkey or not self.hotkey_en_var.get():
+            return
+        tok = self._normalize_tk_keysym(event.keysym)
+        if not tok:
+            return
+        with self._hotkey_lock:
+            self._pressed_keys.add(tok)
+            if self._hotkey_matches(self.hotkey_spec, self._pressed_keys) and not self._hotkey_is_down:
+                self._hotkey_is_down = True
+                if self.hotkey_hold_var.get():
+                    self._on_hotkey_hold_down()
+                else:
+                    self._on_hotkey_toggle()
+
+    def _on_tk_fallback_keyrelease(self, event):
+        tok = self._normalize_tk_keysym(event.keysym)
+        if not tok:
+            return
+        with self._hotkey_lock:
+            self._pressed_keys.discard(tok)
+            if self._hotkey_is_down and not self._hotkey_matches(self.hotkey_spec, self._pressed_keys):
+                self._hotkey_is_down = False
+                if self.hotkey_hold_var.get() and not self._capturing_hotkey and self.hotkey_en_var.get():
+                    self._on_hotkey_hold_up()
+
+    def _set_bypass_state(self, bypass_val: bool):
+        self.bypass_var.set(bool(bypass_val))
+        self._on_param_change()
+
+    def _on_hotkey_toggle(self):
+        self._set_bypass_state(not bool(self.bypass_var.get()))
+
+    def _on_hotkey_hold_down(self):
+        if self._hold_base_bypass is None:
+            self._hold_base_bypass = bool(self.bypass_var.get())
+        self._set_bypass_state(not self._hold_base_bypass)
+
+    def _on_hotkey_hold_up(self):
+        if self._hold_base_bypass is not None:
+            base = self._hold_base_bypass
+            self._hold_base_bypass = None
+            self._set_bypass_state(base)
+
     def _on_close(self):
         if not self._is_quitting and self.minimize_to_tray_var.get() and self._tray_icon is not None:
             self._minimize_to_tray()
@@ -1745,6 +2133,7 @@ class VoxCraftApp(ctk.CTk):
 
     def _quit_app(self):
         self._is_quitting = True
+        self._stop_hotkey_listener()
         self._save_config()
         self.router.stop()
         if self._tray_icon is not None:
