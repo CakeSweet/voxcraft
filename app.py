@@ -205,14 +205,14 @@ class VoxCraftApp(ctk.CTk):
         ctk.CTkLabel(
             titles,
             text=f"Modulador de Voz em Tempo Real • v{APP_VERSION}",
-            font=ctk.CTkFont(size=11.5),
+            font=ctk.CTkFont(size=11),
             text_color="#94a3b8",
         ).pack(anchor="w")
 
         self._splash_lbl = ctk.CTkLabel(
             self._splash_frame,
             text="Carregando motor de áudio (NumPy / SciPy)...",
-            font=ctk.CTkFont(size=12.5),
+            font=ctk.CTkFont(size=12),
             text_color="#cbd5e1",
         )
         self._splash_lbl.pack(pady=(14, 10))
@@ -1986,7 +1986,7 @@ class VoxCraftApp(ctk.CTk):
             text="Verificando atualizações (suas entradas, saídas e atalhos estão salvos)...",
             justify="left",
             wraplength=515,
-            font=ctk.CTkFont(size=12.5),
+            font=ctk.CTkFont(size=12),
         )
         msg_lbl.pack(anchor="w", padx=20, pady=8)
 
@@ -2366,7 +2366,7 @@ class VoxCraftApp(ctk.CTk):
         ctk.CTkLabel(
             win, text="Roteamento para Discord e Jogos", font=ctk.CTkFont(size=17, weight="bold"), text_color="#4cc9f0"
         ).pack(anchor="w", padx=20, pady=(16, 8))
-        ctk.CTkLabel(win, text=txt, justify="left", font=ctk.CTkFont(size=12.5), wraplength=520).pack(
+        ctk.CTkLabel(win, text=txt, justify="left", font=ctk.CTkFont(size=12), wraplength=520).pack(
             anchor="w", padx=20, pady=4
         )
         ctk.CTkButton(win, text="Entendi!", width=120, command=win.destroy).pack(pady=14)
