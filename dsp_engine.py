@@ -302,6 +302,8 @@ class RealTimeDSPEngine:
         self._voc_phase1 = 0.0
         self._voc_phase2 = 0.0
         self._voc_phase3 = 0.0
+        self._voc_last_smooth = -1.0
+        self._voc_env_ba = None
 
         # Equalizador SOS (7 estágios biquad)
         self._eq_sos = build_eq_sos(self.params, sr)
@@ -316,10 +318,14 @@ class RealTimeDSPEngine:
         self._phaser_phase = 0.0
         self._phaser_zi = np.zeros((12, 1), dtype=np.float64)
         self._phaser_fb_sample = 0.0
+        self._phaser_b = np.empty(2, dtype=np.float64)
+        self._phaser_a = np.array([1.0, 0.0], dtype=np.float64)
 
         # Wahwah (biquad bandpass ressonante)
         self._wah_phase = 0.0
         self._wah_zi = np.zeros(2, dtype=np.float64)
+        self._wah_b = np.zeros(3, dtype=np.float64)
+        self._wah_a = np.array([1.0, 0.0, 0.0], dtype=np.float64)
 
         # Tremolo
         self._trem_phase = 0.0
@@ -342,7 +348,7 @@ class RealTimeDSPEngine:
         self._comb_delays = [max(64, int(d * sr / 44100.0)) for d in comb_base]
         self._ap_delays = [max(64, int(d * sr / 44100.0)) for d in ap_base]
         self._comb_rings = [RingDelay(d + 2048) for d in self._comb_delays]
-        self._comb_lp_state = [0.0 for _ in self._comb_delays]
+        self._comb_lp_state = [np.zeros(1, dtype=np.float64) for _ in self._comb_delays]
         self._ap_rings = [RingDelay(d + 2048) for d in self._ap_delays]
 
     @staticmethod
@@ -576,9 +582,13 @@ class RealTimeDSPEngine:
             # Dente de Serra
             car = (2.0 * p1 - 1.0).astype(np.float32)
 
-        # Filtro passa-baixa de envelope (suavidade)
-        env_fc = 8.0 + (1.0 - float(np.clip(smooth, 0.05, 0.95))) * 55.0
-        env_b, env_a = self._onepole_lp(env_fc, self.sr)
+        # Filtro passa-baixa de envelope (suavidade) em cache
+        sm = float(np.clip(smooth, 0.05, 0.95))
+        if abs(sm - self._voc_last_smooth) > 1e-4 or self._voc_env_ba is None:
+            env_fc = 8.0 + (1.0 - sm) * 55.0
+            self._voc_env_ba = self._onepole_lp(env_fc, self.sr)
+            self._voc_last_smooth = sm
+        env_b, env_a = self._voc_env_ba
 
         out = np.zeros(n, dtype=np.float64)
         for i in range(12):
@@ -631,20 +641,23 @@ class RealTimeDSPEngine:
         out = np.empty(n, dtype=np.float32)
         dphi = float(freq_hz) / self.sr
 
+        b_ap = self._phaser_b
+        a_ap = self._phaser_a
+        b_ap[1] = 1.0
+        a_ap[0] = 1.0
+
         pos = 0
         while pos < n:
             clen = min(n - pos, chunk_sz)
             xc = x[pos:pos + clen].astype(np.float64)
-            # LFO no meio do sub-bloco
             lfo = 0.5 * (1.0 + np.sin(2.0 * np.pi * self._phaser_phase))
             self._phaser_phase = float((self._phaser_phase + clen * dphi) % 1.0)
 
-            fc = 140.0 * (22.0 ** (lfo * d))
-            fc = min(fc, self.sr * 0.42)
+            fc = min(140.0 * (22.0 ** (lfo * d)), self.sr * 0.42)
             t = np.tan(np.pi * fc / self.sr)
             a = (1.0 - t) / (1.0 + t)
-            b_ap = np.array([a, 1.0], dtype=np.float64)
-            a_ap = np.array([1.0, a], dtype=np.float64)
+            b_ap[0] = a
+            a_ap[1] = a
 
             y = xc + fb * self._phaser_fb_sample
             for s in range(n_stages):
@@ -663,6 +676,9 @@ class RealTimeDSPEngine:
         chunk_sz = 32
         out = np.empty(n, dtype=np.float32)
         dphi = float(freq_hz) / self.sr
+        b_wah = self._wah_b
+        a_wah = self._wah_a
+        a_wah[0] = 1.0
 
         pos = 0
         while pos < n:
@@ -671,14 +687,16 @@ class RealTimeDSPEngine:
             lfo = 0.5 * (1.0 + np.sin(2.0 * np.pi * self._wah_phase))
             self._wah_phase = float((self._wah_phase + clen * dphi) % 1.0)
 
-            fc = 320.0 * (8.5 ** (lfo * d))
-            fc = min(fc, self.sr * 0.44)
+            fc = min(320.0 * (8.5 ** (lfo * d)), self.sr * 0.44)
             w0 = 2.0 * np.pi * fc / self.sr
             alpha = np.sin(w0) / (2.0 * q)
             cos_w0 = np.cos(w0)
-            a0 = 1.0 + alpha
-            b_wah = np.array([alpha / a0, 0.0, -alpha / a0], dtype=np.float64) * 2.2
-            a_wah = np.array([1.0, (-2.0 * cos_w0) / a0, (1.0 - alpha) / a0], dtype=np.float64)
+            inv_a0 = 1.0 / (1.0 + alpha)
+            b_val = alpha * inv_a0 * 2.2
+            b_wah[0] = b_val
+            b_wah[2] = -b_val
+            a_wah[1] = (-2.0 * cos_w0) * inv_a0
+            a_wah[2] = (1.0 - alpha) * inv_a0
 
             yw, self._wah_zi = signal.lfilter(b_wah, a_wah, xc, zi=self._wah_zi)
             out[pos:pos + clen] = yw.astype(np.float32)
@@ -769,6 +787,9 @@ class RealTimeDSPEngine:
         max_chunk = min(self._ap_delays)
         wet_out = np.empty(n, dtype=np.float32)
 
+        lp_b = np.array([1.0 - d], dtype=np.float64)
+        lp_a = np.array([1.0, -d], dtype=np.float64)
+
         pos = 0
         while pos < n:
             clen = min(n - pos, max_chunk)
@@ -777,11 +798,9 @@ class RealTimeDSPEngine:
             comb_sum = np.zeros(clen, dtype=np.float32)
             for idx, (ring, delay) in enumerate(zip(self._comb_rings, self._comb_delays)):
                 del_sig = ring.read_chunk(delay, clen)
-                lp_b = np.array([1.0 - d], dtype=np.float64)
-                lp_a = np.array([1.0, -d], dtype=np.float64)
-                zi = np.array([self._comb_lp_state[idx]], dtype=np.float64)
-                damped, zf = signal.lfilter(lp_b, lp_a, del_sig, zi=zi)
-                self._comb_lp_state[idx] = float(zf[0])
+                damped, self._comb_lp_state[idx] = signal.lfilter(
+                    lp_b, lp_a, del_sig, zi=self._comb_lp_state[idx]
+                )
                 ring.write_chunk(xc + fb * damped.astype(np.float32))
                 comb_sum += del_sig
 

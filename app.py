@@ -2,12 +2,15 @@ import ctypes
 from dataclasses import asdict
 import io
 import os
+import re
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
-from tkinter import messagebox, simpledialog
+from tkinter import filedialog, messagebox, simpledialog
 import urllib.request
 import zipfile
 import customtkinter as ctk
@@ -46,9 +49,11 @@ GITHUB_REPO = "CakeSweet/voxcraft_studio"
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ICON_ICO_PATH = os.path.join(BASE_DIR, "assets", "voxcraft.ico")
-ICON_PNG_PATH = os.path.join(BASE_DIR, "assets", "voxcraft.png")
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+BASE_DIR = os.path.dirname(os.path.abspath(sys.executable if IS_FROZEN else __file__))
+ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", BASE_DIR), "assets")
+ICON_ICO_PATH = os.path.join(ASSETS_DIR, "voxcraft.ico")
+ICON_PNG_PATH = os.path.join(ASSETS_DIR, "voxcraft.png")
 
 
 def _enable_windows_taskbar_icon_id():
@@ -114,6 +119,10 @@ class VoxCraftApp(ctk.CTk):
         self._capturing_hotkey = False
         self._capture_mods: set[str] = set()
         self._kb_listener = None
+        self._win32_stop_event = threading.Event()
+        self._win32_thread = None
+        self._hotkey_enabled_cached: bool = True
+        self._hotkey_hold_cached: bool = False
 
         self._build_layout()
         self._restore_saved_ui_prefs()
@@ -1306,6 +1315,7 @@ class VoxCraftApp(ctk.CTk):
         if "hotkey_hold_mode" in cfg:
             self.hotkey_hold_var.set(bool(cfg["hotkey_hold_mode"]))
         self.hotkey_btn.configure(text=self._format_hotkey_label(self.hotkey_spec))
+        self._sync_hotkey_cache()
         self._update_hotkey_hint()
 
     @staticmethod
@@ -1580,7 +1590,7 @@ class VoxCraftApp(ctk.CTk):
         self.after(33, self._schedule_ui_loop)
 
     # ------------------------------------------------------------------ #
-    # Atualização do Aplicativo (Git / GitHub) + Preservar Configurações
+    # Atualização do Aplicativo (Git / GitHub / .zip Local)
     # ------------------------------------------------------------------ #
     @staticmethod
     def _run_cmd(args: list[str], cwd: str) -> tuple[int, str]:
@@ -1588,18 +1598,71 @@ class VoxCraftApp(ctk.CTk):
         if sys.platform == "win32":
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
-            res = subprocess.run(args, timeout=45, **kwargs)
+            res = subprocess.run(args, timeout=60, **kwargs)
             return res.returncode, (res.stdout or "").strip()
+        except FileNotFoundError:
+            return 127, f"Comando não encontrado: {args[0]}"
         except Exception as e:
             return 1, str(e)
 
+    def _detect_github_repo(self) -> str:
+        if os.path.isdir(os.path.join(BASE_DIR, ".git")) and shutil.which("git"):
+            rc, url = self._run_cmd(["git", "config", "--get", "remote.origin.url"], BASE_DIR)
+            if rc == 0 and url:
+                m = re.search(r"github\.com[:/]([^/]+/[^/.\s]+)", url)
+                if m:
+                    return m.group(1).removesuffix(".git")
+        return GITHUB_REPO
+
+    @staticmethod
+    def _download_bytes(url: str, timeout: int = 25) -> bytes:
+        req = urllib.request.Request(url, headers={"User-Agent": "VoxCraft-Studio-Updater/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except Exception as e:
+            if "CERTIFICATE_VERIFY_FAILED" in str(e):
+                ctx = ssl._create_unverified_context()
+                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                    return resp.read()
+            raise
+
+    @staticmethod
+    def _extract_zip_preserving_config(raw_or_path) -> int:
+        preserved = {"voxcraft_config.json", "user_presets.json"}
+        count = 0
+        with zipfile.ZipFile(raw_or_path) as zf:
+            members = [m for m in zf.infolist() if not m.is_dir()]
+            # Detecta se o ZIP possui pasta raiz única (padrão GitHub archive)
+            top_dirs = {m.filename.split("/", 1)[0] for m in members if "/" in m.filename}
+            strip_prefix = len(top_dirs) == 1 and any(
+                m.filename.endswith(("/app.py", "/dsp_engine.py", "/requirements.txt")) for m in members
+            )
+            base_norm = os.path.normpath(BASE_DIR)
+            for member in members:
+                rel = member.filename
+                if strip_prefix and "/" in rel:
+                    rel = rel.split("/", 1)[1]
+                if not rel or rel in preserved:
+                    continue
+                if rel.startswith(".") and rel != ".gitignore":
+                    continue
+                dest = os.path.normpath(os.path.join(BASE_DIR, rel))
+                if not dest.startswith(base_norm + os.sep) and dest != base_norm:
+                    continue
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with zf.open(member) as src, open(dest, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                count += 1
+        return count
+
     def _start_app_update(self):
-        # Salva imediatamente entradas, saídas, preset e parâmetros atuais antes de checar/atualizar
+        # Salva imediatamente entradas, saídas, preset, atalho e parâmetros atuais
         self._save_config(include_params=True)
 
         win = ctk.CTkToplevel(self)
         win.title("Atualizar VoxCraft Studio")
-        win.geometry("490x260")
+        win.geometry("540x310")
         win.resizable(False, False)
         win.grab_set()
 
@@ -1609,172 +1672,232 @@ class VoxCraftApp(ctk.CTk):
 
         msg_lbl = ctk.CTkLabel(
             win,
-            text="Verificando atualizações e garantindo que suas entradas e saídas estejam salvas...",
+            text="Verificando atualizações (suas entradas, saídas e atalhos estão salvos)...",
             justify="left",
-            wraplength=450,
+            wraplength=500,
             font=ctk.CTkFont(size=12.5),
         )
         msg_lbl.pack(anchor="w", padx=20, pady=8)
 
-        progress = ctk.CTkProgressBar(win, mode="indeterminate", width=440)
-        progress.pack(padx=20, pady=(6, 12))
+        progress = ctk.CTkProgressBar(win, mode="indeterminate", width=490)
+        progress.pack(padx=20, pady=(6, 14))
         progress.start()
 
         btn_row = ctk.CTkFrame(win, fg_color="transparent")
         btn_row.pack(fill="x", padx=20, pady=(6, 14))
 
-        action_btn = ctk.CTkButton(btn_row, text="Aplicar Atualização", width=165, fg_color="#10b981", state="disabled")
+        action_btn = ctk.CTkButton(btn_row, text="Atualizar Agora", width=165, fg_color="#10b981", state="disabled")
         action_btn.pack(side="left")
-        close_btn = ctk.CTkButton(btn_row, text="Fechar", width=100, fg_color="#334155", command=win.destroy)
+
+        zip_local_btn = ctk.CTkButton(
+            btn_row,
+            text="Atualizar de .zip Local",
+            width=155,
+            fg_color="#2563eb",
+            hover_color="#1d4ed8",
+        )
+        zip_local_btn.pack(side="left", padx=(10, 0))
+
+        close_btn = ctk.CTkButton(btn_row, text="Fechar", width=95, fg_color="#334155", command=win.destroy)
         close_btn.pack(side="right")
 
         def safe_ui(fn):
             if win.winfo_exists():
                 self.after(0, fn)
 
-        def finish_with_message(text: str, color: str = "#e2e8f0"):
+        def finish_message(text: str, color: str = "#e2e8f0", enable_action: bool = False, btn_text: str = "Atualizar Agora", cmd=None):
             def _ui():
                 progress.stop()
                 progress.set(1.0)
                 msg_lbl.configure(text=text, text_color=color)
-                action_btn.configure(state="disabled")
+                if enable_action and cmd is not None:
+                    action_btn.configure(state="normal", text=btn_text, command=cmd)
+                else:
+                    action_btn.configure(state="disabled")
+                close_btn.configure(state="normal")
+                zip_local_btn.configure(state="normal")
             safe_ui(_ui)
 
-        def apply_git_update(target_ref: str):
+        def install_deps_and_relaunch():
+            if not IS_FROZEN:
+                safe_ui(lambda: msg_lbl.configure(text="Instalando/verificando dependências (requirements.txt)..."))
+                self._run_cmd([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"], BASE_DIR)
+            safe_ui(lambda: self._relaunch_after_update(win))
+
+        def apply_local_zip():
+            if IS_FROZEN:
+                messagebox.showinfo(
+                    "Versão Executável (.exe)",
+                    "Você está rodando a versão executável instalada (.exe).\n"
+                    "Para atualizar o .exe, baixe o novo instalador ou execute a partir do código Python.",
+                    parent=win,
+                )
+                return
+            zip_path = filedialog.askopenfilename(
+                parent=win,
+                title="Selecione o arquivo .zip do VoxCraft Studio",
+                filetypes=[("Arquivo ZIP", "*.zip")],
+            )
+            if not zip_path:
+                return
+
             def _worker():
                 safe_ui(lambda: (
                     action_btn.configure(state="disabled"),
+                    zip_local_btn.configure(state="disabled"),
                     close_btn.configure(state="disabled"),
                     progress.start(),
-                    msg_lbl.configure(text="Baixando novos arquivos via Git...", text_color="#38bdf8"),
+                    msg_lbl.configure(text="Aplicando arquivos do .zip selecionado...", text_color="#38bdf8"),
                 ))
-                rc, out = self._run_cmd(["git", "pull", "--ff-only"], BASE_DIR)
-                if rc != 0:
-                    remote_branch = target_ref.split("/", 1)[-1] if "/" in target_ref else "main"
-                    rc, out = self._run_cmd(["git", "pull", "--autostash", "origin", remote_branch], BASE_DIR)
-                if rc != 0:
-                    safe_ui(lambda: (
-                        progress.stop(),
-                        close_btn.configure(state="normal"),
-                        msg_lbl.configure(text=f"Falha ao atualizar via Git:\n{out[:280]}", text_color="#ef4444"),
-                    ))
-                    return
-
-                safe_ui(lambda: msg_lbl.configure(text="Atualizando dependências Python (requirements.txt)..."))
-                self._run_cmd([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"], BASE_DIR)
-                safe_ui(self._relaunch_after_update)
+                try:
+                    n_files = self._extract_zip_preserving_config(zip_path)
+                    if n_files == 0:
+                        finish_message("Nenhum arquivo válido encontrado dentro do .zip.", "#ef4444")
+                        return
+                    install_deps_and_relaunch()
+                except Exception as e:
+                    finish_message(f"Erro ao extrair .zip:\n{e}", "#ef4444")
 
             threading.Thread(target=_worker, daemon=True).start()
 
-        def apply_zip_update():
+        zip_local_btn.configure(command=apply_local_zip)
+
+        def apply_git_update(target_ref: str, force_reset: bool = False):
             def _worker():
                 safe_ui(lambda: (
                     action_btn.configure(state="disabled"),
+                    zip_local_btn.configure(state="disabled"),
                     close_btn.configure(state="disabled"),
                     progress.start(),
-                    msg_lbl.configure(text="Baixando pacote mais recente do GitHub...", text_color="#38bdf8"),
+                    msg_lbl.configure(text="Baixando e aplicando atualização via Git...", text_color="#38bdf8"),
+                ))
+                if force_reset:
+                    rc, out = self._run_cmd(["git", "reset", "--hard", target_ref], BASE_DIR)
+                else:
+                    rc, out = self._run_cmd(["git", "pull", "--ff-only"], BASE_DIR)
+                    if rc != 0:
+                        remote_branch = target_ref.split("/", 1)[-1] if "/" in target_ref else "main"
+                        rc, out = self._run_cmd(["git", "pull", "--autostash", "origin", remote_branch], BASE_DIR)
+                    if rc != 0:
+                        rc, out = self._run_cmd(["git", "reset", "--hard", target_ref], BASE_DIR)
+                if rc != 0:
+                    finish_message(
+                        f"Falha ao atualizar via Git:\n{out[:260]}\n\nVocê pode usar 'Atualizar de .zip Local'.",
+                        "#ef4444",
+                    )
+                    return
+                install_deps_and_relaunch()
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        def apply_github_zip_update(repo_slug: str):
+            def _worker():
+                safe_ui(lambda: (
+                    action_btn.configure(state="disabled"),
+                    zip_local_btn.configure(state="disabled"),
+                    close_btn.configure(state="disabled"),
+                    progress.start(),
+                    msg_lbl.configure(text=f"Baixando última versão de github.com/{repo_slug}...", text_color="#38bdf8"),
                 ))
                 raw_zip = None
                 last_err = ""
                 for branch in ("main", "master"):
-                    url = f"https://github.com/{GITHUB_REPO}/archive/refs/heads/{branch}.zip"
+                    url = f"https://github.com/{repo_slug}/archive/refs/heads/{branch}.zip"
                     try:
-                        with urllib.request.urlopen(url, timeout=25) as resp:
-                            raw_zip = resp.read()
+                        raw_zip = self._download_bytes(url, timeout=25)
                         break
                     except Exception as e:
                         last_err = str(e)
                 if not raw_zip:
-                    safe_ui(lambda: (
-                        progress.stop(),
-                        close_btn.configure(state="normal"),
-                        msg_lbl.configure(text=f"Não foi possível baixar atualização:\n{last_err}", text_color="#ef4444"),
-                    ))
+                    finish_message(
+                        f"Não foi possível baixar do GitHub ({repo_slug}):\n{last_err}\n\n"
+                        "Se o repositório for privado ou offline, use o botão 'Atualizar de .zip Local'.",
+                        "#ef4444",
+                    )
                     return
-
                 try:
-                    preserved = {"voxcraft_config.json", "user_presets.json"}
-                    with zipfile.ZipFile(io.BytesIO(raw_zip)) as zf:
-                        for member in zf.infolist():
-                            if member.is_dir():
-                                continue
-                            parts = member.filename.split("/", 1)
-                            rel = parts[1] if len(parts) > 1 else parts[0]
-                            if not rel or rel in preserved or rel.startswith("."):
-                                if rel != ".gitignore":
-                                    continue
-                            dest = os.path.normpath(os.path.join(BASE_DIR, rel))
-                            if not dest.startswith(os.path.normpath(BASE_DIR)):
-                                continue
-                            os.makedirs(os.path.dirname(dest), exist_ok=True)
-                            with zf.open(member) as src, open(dest, "wb") as dst:
-                                shutil.copyfileobj(src, dst)
+                    self._extract_zip_preserving_config(io.BytesIO(raw_zip))
                 except Exception as e:
-                    safe_ui(lambda: (
-                        progress.stop(),
-                        close_btn.configure(state="normal"),
-                        msg_lbl.configure(text=f"Erro ao extrair arquivos:\n{e}", text_color="#ef4444"),
-                    ))
+                    finish_message(f"Erro ao extrair atualização:\n{e}", "#ef4444")
                     return
-
-                safe_ui(lambda: msg_lbl.configure(text="Atualizando dependências Python (requirements.txt)..."))
-                self._run_cmd([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"], BASE_DIR)
-                safe_ui(self._relaunch_after_update)
+                install_deps_and_relaunch()
 
             threading.Thread(target=_worker, daemon=True).start()
 
         def check_worker():
+            if IS_FROZEN:
+                finish_message(
+                    "Você está executando o VoxCraft Studio instalado (.exe).\n"
+                    "Para atualizar o executável, baixe o novo VoxCraftStudio_Setup.exe do GitHub Releases "
+                    "(suas configurações ficam salvas em %APPDATA%\\VoxCraftStudio).",
+                    "#e2e8f0",
+                )
+                return
+
+            repo_slug = self._detect_github_repo()
             git_dir = os.path.join(BASE_DIR, ".git")
-            if os.path.isdir(git_dir):
+            has_git = os.path.isdir(git_dir) and (shutil.which("git") is not None)
+
+            if has_git:
                 rc, out = self._run_cmd(["git", "fetch", "origin"], BASE_DIR)
-                if rc != 0:
-                    finish_with_message(f"Não foi possível verificar o GitHub:\n{out[:260]}", "#f59e0b")
-                    return
-                rc_u, upstream = self._run_cmd(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], BASE_DIR)
-                target = upstream if rc_u == 0 and upstream else "origin/main"
-                rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
-                if rc_r != 0:
-                    target = "origin/master"
+                if rc == 0:
+                    rc_u, upstream = self._run_cmd(
+                        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], BASE_DIR
+                    )
+                    target = upstream if rc_u == 0 and upstream else "origin/main"
                     rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
-                rc_h, local_sha = self._run_cmd(["git", "rev-parse", "HEAD"], BASE_DIR)
-                if rc_h == 0 and rc_r == 0 and local_sha == remote_sha:
-                    finish_with_message(
-                        "Você já está na versão mais recente do VoxCraft Studio!\n"
-                        "Suas entradas e saídas de áudio continuam salvas.",
-                        "#10b981",
+                    if rc_r != 0:
+                        target = "origin/master"
+                        rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
+                    rc_h, local_sha = self._run_cmd(["git", "rev-parse", "HEAD"], BASE_DIR)
+                    if rc_h == 0 and rc_r == 0 and local_sha == remote_sha:
+                        finish_message(
+                            "Você já está na versão mais recente do repositório Git!\n"
+                            "Se quiser sincronizar mesmo assim ou usar um pacote exportado, clique abaixo.",
+                            "#10b981",
+                            enable_action=True,
+                            btn_text="Forçar Reinstalação",
+                            cmd=lambda: apply_git_update(target, force_reset=True),
+                        )
+                        return
+
+                    _, log_out = self._run_cmd(["git", "log", f"HEAD..{target}", "--oneline", "-n", "4"], BASE_DIR)
+                    summary = f"Nova atualização encontrada!\n{log_out}" if log_out else "Diferenças detectadas em relação ao GitHub."
+                    finish_message(
+                        f"{summary}\n\nSuas entradas, saídas, presets e atalhos serão mantidos.",
+                        "#e2e8f0",
+                        enable_action=True,
+                        btn_text="Aplicar Atualização",
+                        cmd=lambda: apply_git_update(target),
                     )
                     return
 
-                _, log_out = self._run_cmd(["git", "log", f"HEAD..{target}", "--oneline", "-n", "4"], BASE_DIR)
-                summary = f"Nova atualização disponível!\n\n{log_out}" if log_out else "Nova atualização disponível no repositório."
-                safe_ui(lambda: (
-                    progress.stop(),
-                    msg_lbl.configure(
-                        text=f"{summary}\n\nSuas entradas, saídas e presets serão mantidos.",
-                        text_color="#e2e8f0",
-                    ),
-                    action_btn.configure(state="normal", command=lambda: apply_git_update(target)),
-                ))
-            else:
-                safe_ui(lambda: (
-                    progress.stop(),
-                    msg_lbl.configure(
-                        text="Pasta sem repositório Git detectada.\n"
-                             "Você pode baixar e aplicar a versão mais recente do GitHub agora.\n"
-                             "Suas entradas, saídas e presets salvos não serão apagados.",
-                        text_color="#e2e8f0",
-                    ),
-                    action_btn.configure(state="normal", text="Baixar e Atualizar", command=apply_zip_update),
-                ))
+            # Fallback sem Git (ZIP do GitHub ou .zip local)
+            finish_message(
+                f"Pronto para baixar a atualização de github.com/{repo_slug}\n"
+                "ou aplicar um arquivo .zip baixado manualmente.\n"
+                "Suas entradas, saídas, presets e atalhos serão mantidos.",
+                "#e2e8f0",
+                enable_action=True,
+                btn_text="Baixar do GitHub",
+                cmd=lambda: apply_github_zip_update(repo_slug),
+            )
 
         threading.Thread(target=check_worker, daemon=True).start()
 
-    def _relaunch_after_update(self):
+    def _relaunch_after_update(self, modal_win=None):
         self.app_config["pending_update_restore"] = True
         self.app_config["was_running_before_update"] = bool(self.router.running)
         self._save_config(include_params=True)
+        if modal_win is not None:
+            try:
+                modal_win.grab_release()
+                modal_win.destroy()
+            except Exception:
+                pass
         try:
-            subprocess.Popen([sys.executable, os.path.abspath(__file__)], cwd=BASE_DIR)
+            cmd = [sys.executable] if IS_FROZEN else [sys.executable, os.path.abspath(__file__)]
+            subprocess.Popen(cmd, cwd=BASE_DIR)
         except Exception as e:
             messagebox.showerror("Atualização Concluída", f"Arquivos atualizados! Reabra o aplicativo manualmente.\n({e})")
         self._quit_app()
@@ -1814,7 +1937,7 @@ class VoxCraftApp(ctk.CTk):
         ctk.CTkButton(win, text="Entendi!", width=120, command=win.destroy).pack(pady=14)
 
     # ------------------------------------------------------------------ #
-    # Tecla de Atalho Configurável (Alternar ou Manter Segurando)
+    # Tecla de Atalho Configurável (Global mesmo em 2º plano / jogos)
     # ------------------------------------------------------------------ #
     @staticmethod
     def _format_hotkey_label(spec: str) -> str:
@@ -1845,6 +1968,8 @@ class VoxCraftApp(ctk.CTk):
             "pause": "Pause",
             "scroll_lock": "Scroll Lock",
             "print_screen": "Print Screen",
+            "mouse4": "Mouse 4 (Lateral)",
+            "mouse5": "Mouse 5 (Lateral)",
             "up": "↑",
             "down": "↓",
             "left": "←",
@@ -1852,6 +1977,59 @@ class VoxCraftApp(ctk.CTk):
         }
         parts = [nice.get(p, p.upper()) for p in spec.split("+") if p]
         return " + ".join(parts) if parts else "Definir Tecla"
+
+    @staticmethod
+    def _token_to_win32_vks(tok: str) -> tuple[int, ...]:
+        vk_map = {
+            "ctrl": (0x11,),
+            "ctrl_l": (0xA2,),
+            "ctrl_r": (0xA3,),
+            "shift": (0x10,),
+            "shift_l": (0xA0,),
+            "shift_r": (0xA1,),
+            "alt": (0x12,),
+            "alt_l": (0xA4,),
+            "alt_r": (0xA5,),
+            "alt_gr": (0xA5,),
+            "caps_lock": (0x14,),
+            "space": (0x20,),
+            "tab": (0x09,),
+            "enter": (0x0D,),
+            "backspace": (0x08,),
+            "insert": (0x2D,),
+            "delete": (0x2E,),
+            "home": (0x24,),
+            "end": (0x23,),
+            "page_up": (0x21,),
+            "page_down": (0x22,),
+            "pause": (0x13,),
+            "scroll_lock": (0x91,),
+            "print_screen": (0x2C,),
+            "left": (0x25,),
+            "up": (0x26,),
+            "right": (0x27,),
+            "down": (0x28,),
+            "mouse4": (0x05,),
+            "mouse5": (0x06,),
+        }
+        if tok in vk_map:
+            return vk_map[tok]
+        if tok.startswith("f") and tok[1:].isdigit():
+            num = int(tok[1:])
+            if 1 <= num <= 24:
+                return (0x70 + num - 1,)
+        if len(tok) == 1:
+            ch = tok.upper()
+            if ("A" <= ch <= "Z") or ("0" <= ch <= "9"):
+                return (ord(ch),)
+            if sys.platform == "win32":
+                try:
+                    res = ctypes.windll.user32.VkKeyScanW(ord(tok))
+                    if (res & 0xFF) != 0xFF:
+                        return (res & 0xFF,)
+                except Exception:
+                    pass
+        return ()
 
     @staticmethod
     def _normalize_tk_keysym(keysym: str) -> str | None:
@@ -1934,6 +2112,9 @@ class VoxCraftApp(ctk.CTk):
                 return False
         return True
 
+    def _has_global_hotkey_backend(self) -> bool:
+        return (sys.platform == "win32") or (self._kb_listener is not None) or (pynput_kb is not None)
+
     def _update_hotkey_hint(self):
         if not hasattr(self, "hotkey_hint_lbl"):
             return
@@ -1944,19 +2125,24 @@ class VoxCraftApp(ctk.CTk):
         if not self.hotkey_en_var.get():
             self.hotkey_hint_lbl.configure(text=f"● {state_txt} (Atalho desativado)", text_color="#94a3b8")
         elif self.hotkey_hold_var.get():
-            hint_scope = "" if pynput_kb is not None else " (na janela)"
+            hint_scope = "Global (2º plano/jogos)" if self._has_global_hotkey_backend() else "na janela"
             self.hotkey_hint_lbl.configure(
-                text=f"● {state_txt} | Segure {lbl_key}{hint_scope}",
+                text=f"● {state_txt} | Segure {lbl_key} • {hint_scope}",
                 text_color=color,
             )
         else:
-            hint_scope = "" if pynput_kb is not None else " (na janela)"
+            hint_scope = "Global (2º plano/jogos)" if self._has_global_hotkey_backend() else "na janela"
             self.hotkey_hint_lbl.configure(
-                text=f"● {state_txt} | Pressione {lbl_key}{hint_scope}",
+                text=f"● {state_txt} | Pressione {lbl_key} • {hint_scope}",
                 text_color=color,
             )
 
+    def _sync_hotkey_cache(self):
+        self._hotkey_enabled_cached = bool(self.hotkey_en_var.get())
+        self._hotkey_hold_cached = bool(self.hotkey_hold_var.get())
+
     def _on_hotkey_setting_changed(self):
+        self._sync_hotkey_cache()
         with self._hotkey_lock:
             self._hotkey_is_down = False
             self._hold_base_bypass = None
@@ -1972,10 +2158,29 @@ class VoxCraftApp(ctk.CTk):
         with self._hotkey_lock:
             self._hotkey_is_down = False
             self._hold_base_bypass = None
-        self.hotkey_btn.configure(text="Pressione a tecla... (Esc)", fg_color="#d97706", hover_color="#b45309")
+        self.hotkey_btn.configure(text="Pressione tecla/Mouse4/5... (Esc)", fg_color="#d97706", hover_color="#b45309")
         self.focus_force()
         self._cap_press_id = self.bind("<KeyPress>", self._on_capture_keypress, add="+")
         self._cap_release_id = self.bind("<KeyRelease>", self._on_capture_keyrelease, add="+")
+        if sys.platform == "win32":
+            self.after(30, self._poll_win32_mouse_capture)
+
+    def _poll_win32_mouse_capture(self):
+        if not self._capturing_hotkey or sys.platform != "win32":
+            return
+        try:
+            u32 = ctypes.windll.user32
+            if u32.GetAsyncKeyState(0x05) & 0x8000:
+                self.hotkey_spec = "mouse4"
+                self._stop_hotkey_capture(cancelled=False)
+                return
+            if u32.GetAsyncKeyState(0x06) & 0x8000:
+                self.hotkey_spec = "mouse5"
+                self._stop_hotkey_capture(cancelled=False)
+                return
+        except Exception:
+            pass
+        self.after(30, self._poll_win32_mouse_capture)
 
     def _stop_hotkey_capture(self, cancelled: bool = False):
         self._capturing_hotkey = False
@@ -2031,10 +2236,41 @@ class VoxCraftApp(ctk.CTk):
             self._stop_hotkey_capture(cancelled=False)
             return "break"
 
+    def _win32_hotkey_loop(self):
+        user32 = ctypes.windll.user32
+        while not self._win32_stop_event.is_set() and not self._is_quitting:
+            if not self._capturing_hotkey and self._hotkey_enabled_cached and self.hotkey_spec:
+                tokens = [t for t in self.hotkey_spec.split("+") if t]
+                vk_groups = [self._token_to_win32_vks(t) for t in tokens]
+                if vk_groups and all(vg for vg in vk_groups):
+                    is_down = all(any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in vg) for vg in vk_groups)
+                    hold = self._hotkey_hold_cached
+                    with self._hotkey_lock:
+                        if is_down and not self._hotkey_is_down:
+                            self._hotkey_is_down = True
+                            if hold:
+                                self.after(0, self._on_hotkey_hold_down)
+                            else:
+                                self.after(0, self._on_hotkey_toggle)
+                        elif not is_down and self._hotkey_is_down:
+                            self._hotkey_is_down = False
+                            if hold:
+                                self.after(0, self._on_hotkey_hold_up)
+            time.sleep(0.012)
+
     def _start_hotkey_listener(self):
+        self._sync_hotkey_cache()
+        # No Windows, usa API nativa GetAsyncKeyState: funciona globalmente mesmo minimizado/bandeja/jogos sem depender de pynput
+        if sys.platform == "win32":
+            self._win32_stop_event.clear()
+            self._win32_thread = threading.Thread(target=self._win32_hotkey_loop, daemon=True)
+            self._win32_thread.start()
+            self._update_hotkey_hint()
+            return
+
         if pynput_kb is not None:
             def on_press(key):
-                if self._is_quitting or self._capturing_hotkey or not self.hotkey_en_var.get():
+                if self._is_quitting or self._capturing_hotkey or not self._hotkey_enabled_cached:
                     return
                 tok = self._normalize_pynput_key(key)
                 if not tok:
@@ -2044,7 +2280,7 @@ class VoxCraftApp(ctk.CTk):
                     matched = self._hotkey_matches(self.hotkey_spec, self._pressed_keys)
                     if matched and not self._hotkey_is_down:
                         self._hotkey_is_down = True
-                        hold = bool(self.hotkey_hold_var.get())
+                        hold = self._hotkey_hold_cached
                         if hold:
                             self.after(0, self._on_hotkey_hold_down)
                         else:
@@ -2058,22 +2294,25 @@ class VoxCraftApp(ctk.CTk):
                     self._pressed_keys.discard(tok)
                     if self._hotkey_is_down and not self._hotkey_matches(self.hotkey_spec, self._pressed_keys):
                         self._hotkey_is_down = False
-                        if self.hotkey_hold_var.get() and not self._capturing_hotkey and self.hotkey_en_var.get():
+                        if self._hotkey_hold_cached and not self._capturing_hotkey and self._hotkey_enabled_cached:
                             self.after(0, self._on_hotkey_hold_up)
 
             try:
                 self._kb_listener = pynput_kb.Listener(on_press=on_press, on_release=on_release)
                 self._kb_listener.daemon = True
                 self._kb_listener.start()
+                self._update_hotkey_hint()
                 return
             except Exception:
                 self._kb_listener = None
 
-        # Fallback dentro da janela caso pynput não esteja instalado
+        # Fallback dentro da janela caso não esteja no Windows e pynput não esteja instalado
         self.bind("<KeyPress>", self._on_tk_fallback_keypress, add="+")
         self.bind("<KeyRelease>", self._on_tk_fallback_keyrelease, add="+")
+        self._update_hotkey_hint()
 
     def _stop_hotkey_listener(self):
+        self._win32_stop_event.set()
         if self._kb_listener is not None:
             try:
                 self._kb_listener.stop()

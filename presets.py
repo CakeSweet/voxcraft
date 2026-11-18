@@ -1,10 +1,26 @@
 import json
 import os
+import sys
 from dataclasses import asdict
 from dsp_engine import DSPParams
 
-USER_PRESETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_presets.json")
-APP_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voxcraft_config.json")
+
+def get_user_data_dir() -> str:
+    app_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+    if not getattr(sys, "frozen", False) and os.access(app_dir, os.W_OK):
+        return app_dir
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        data_dir = os.path.join(base, "VoxCraftStudio")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+        data_dir = os.path.join(base, "VoxCraftStudio")
+    os.makedirs(data_dir, exist_ok=True)
+    return data_dir
+
+
+USER_PRESETS_FILE = os.path.join(get_user_data_dir(), "user_presets.json")
+APP_CONFIG_FILE = os.path.join(get_user_data_dir(), "voxcraft_config.json")
 
 
 def get_builtin_presets() -> dict[str, DSPParams]:
@@ -418,6 +434,7 @@ def load_user_presets() -> dict[str, DSPParams]:
 
 
 def save_user_presets(user_presets: dict[str, DSPParams]):
+    os.makedirs(os.path.dirname(USER_PRESETS_FILE), exist_ok=True)
     serializable = {name: asdict(params) for name, params in user_presets.items()}
     with open(USER_PRESETS_FILE, "w", encoding="utf-8") as f:
         json.dump(serializable, f, indent=2, ensure_ascii=False)
@@ -436,6 +453,7 @@ def load_app_config() -> dict:
 
 def save_app_config(config: dict):
     try:
+        os.makedirs(os.path.dirname(APP_CONFIG_FILE), exist_ok=True)
         with open(APP_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
     except Exception:
