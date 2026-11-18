@@ -23,6 +23,8 @@ OutputBaseFilename=VoxCraftStudio_Setup
 SetupIconFile=assets\voxcraft.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
+ShowLanguageDialog=yes
+LanguageDetectionMethod=none
 Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
@@ -30,7 +32,14 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "portuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
+Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
+
+[CustomMessages]
+english.UninstallApp=Uninstall {#MyAppName}
+portuguese.UninstallApp=Desinstalar {#MyAppName}
+spanish.UninstallApp=Desinstalar {#MyAppName}
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
@@ -41,8 +50,31 @@ Source: "assets\voxcraft.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
-Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
+Name: "{group}\{cm:UninstallApp}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  CfgDir, CfgFile, LangCode: string;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    CfgDir := ExpandConstant('{userappdata}\VoxCraftStudio');
+    CfgFile := CfgDir + '\voxcraft_config.json';
+    if not FileExists(CfgFile) then
+    begin
+      ForceDirectories(CfgDir);
+      if ActiveLanguage = 'portuguese' then
+        LangCode := 'pt'
+      else if ActiveLanguage = 'spanish' then
+        LangCode := 'es'
+      else
+        LangCode := 'en';
+      SaveStringToFile(CfgFile, '{"language": "' + LangCode + '"}', False);
+    end;
+  end;
+end;
