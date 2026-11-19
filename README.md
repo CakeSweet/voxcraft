@@ -1,6 +1,9 @@
 <div align="center">
 
-# 🎙️ VoxCraft Studio
+
+<img src="https://i.ibb.co/4RSQm9Wp/voxcraft.png" alt="Voxcraft Icon" width="112" />
+
+# VoxCraft Studio
 
 **Real-time desktop voice modulator and DSP studio**
 **Modulador de voz em tempo real e estúdio DSP para desktop**
