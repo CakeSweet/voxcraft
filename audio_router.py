@@ -82,6 +82,8 @@ class AudioRouter:
     def __init__(self, dsp: RealTimeDSPEngine):
         self.dsp = dsp
         self.running = False
+        self._op_lock = threading.Lock()
+        self._abort_event = threading.Event()
         self._stream = None
         self._in_stream = None
         self._out_stream = None
@@ -94,16 +96,21 @@ class AudioRouter:
         self.active_mon_sr = 48000
         self.active_block = 512
 
+    def abort_start(self):
+        self._abort_event.set()
+
     @staticmethod
     def list_devices() -> tuple[list[AudioDeviceItem], list[AudioDeviceItem]]:
-        devs = sd.query_devices()
-        hostapis = sd.query_hostapis()
+        try:
+            devs = sd.query_devices()
+            hostapis = sd.query_hostapis()
+        except Exception:
+            return [], []
         inputs: list[AudioDeviceItem] = []
         outputs: list[AudioDeviceItem] = []
 
         for idx, d in enumerate(devs):
             api_name = hostapis[d["hostapi"]]["name"]
-            # Simplifica nomes longos de Host API no Windows
             if "WASAPI" in api_name:
                 api_short = "WASAPI"
             elif "DirectSound" in api_name:
@@ -146,7 +153,7 @@ class AudioRouter:
         if preferred:
             raw.extend(preferred)
         default_sr = int(round(float(dev_info.get("default_samplerate", 48000) or 48000)))
-        raw.extend([default_sr, 48000, 44100, 96000, 192000, 32000, 24000, 16000])
+        raw.extend([default_sr, 48000, 44100, 96000, 32000, 16000])
         out: list[int] = []
         for sr in raw:
             if sr > 0 and sr not in out:
@@ -155,7 +162,10 @@ class AudioRouter:
 
     @staticmethod
     def _find_supported_configs(
-        dev_idx: int, is_input: bool, preferred_srs: list[int] | None = None
+        dev_idx: int,
+        is_input: bool,
+        preferred_srs: list[int] | None = None,
+        abort_event: threading.Event | None = None,
     ) -> list[tuple[int, int]]:
         info = sd.query_devices(dev_idx)
         max_ch = int(info["max_input_channels"] if is_input else info["max_output_channels"])
@@ -166,6 +176,8 @@ class AudioRouter:
         rates = AudioRouter._candidate_rates(info, preferred_srs)
         valid: list[tuple[int, int]] = []
         for sr in rates:
+            if abort_event is not None and abort_event.is_set():
+                break
             for ch in ch_opts:
                 try:
                     if is_input:
@@ -189,163 +201,215 @@ class AudioRouter:
         monitor_enabled: bool = False,
         monitor_idx: int | None = None,
     ) -> tuple[bool, str]:
-        self.stop()
-        self.monitor_enabled = monitor_enabled and (monitor_idx is not None) and (monitor_idx != out_idx)
-        self._bridge_fifo.clear()
-        self._mon_fifo.clear()
+        with self._op_lock:
+            self._abort_event.clear()
+            self._stop_unlocked()
+            self.monitor_enabled = monitor_enabled and (monitor_idx is not None) and (monitor_idx != out_idx)
+            self._bridge_fifo.clear()
+            self._mon_fifo.clear()
 
-        in_info = sd.query_devices(in_idx)
-        out_info = sd.query_devices(out_idx)
+            try:
+                in_info = sd.query_devices(in_idx)
+                out_info = sd.query_devices(out_idx)
+            except Exception as exc:
+                return False, f"Dispositivo inválido: {exc}"
 
-        in_def = int(round(float(in_info.get("default_samplerate", 48000) or 48000)))
-        out_def = int(round(float(out_info.get("default_samplerate", 48000) or 48000)))
+            in_def = int(round(float(in_info.get("default_samplerate", 48000) or 48000)))
+            out_def = int(round(float(out_info.get("default_samplerate", 48000) or 48000)))
 
-        shared_srs = []
-        for sr in [48000, in_def, out_def, 44100, 96000]:
-            if sr > 0 and sr not in shared_srs:
-                shared_srs.append(sr)
+            shared_srs = []
+            for sr in [48000, in_def, out_def, 44100, 96000]:
+                if sr > 0 and sr not in shared_srs:
+                    shared_srs.append(sr)
 
-        in_ch_opts = [1, 2] if int(in_info["max_input_channels"]) >= 2 else [1]
-        out_ch_opts = [2, 1] if int(out_info["max_output_channels"]) >= 2 else [1]
-        block_opts = [blocksize, 0] if blocksize > 0 else [0]
+            in_ch_opts = [1, 2] if int(in_info["max_input_channels"]) >= 2 else [1]
+            out_ch_opts = [2, 1] if int(out_info["max_output_channels"]) >= 2 else [1]
+            block_opts = [blocksize, 0] if blocksize > 0 else [0]
 
-        last_err = ""
-        # 1. Tenta stream duplex (menor latência quando Entrada e Saída aceitam a mesma taxa)
-        for blk in block_opts:
-            for sr in shared_srs:
-                for in_ch in in_ch_opts:
-                    for out_ch in out_ch_opts:
-                        try:
-                            sd.check_input_settings(device=in_idx, channels=in_ch, samplerate=sr, dtype="float32")
-                            sd.check_output_settings(device=out_idx, channels=out_ch, samplerate=sr, dtype="float32")
+            # Pré-valida taxas/canais uma única vez antes de combinar blocos (evita dezenas de probes duplicados)
+            in_ok_cache: dict[tuple[int, int], bool] = {}
+            out_ok_cache: dict[tuple[int, int], bool] = {}
 
-                            self.dsp.set_sample_rate(sr)
-                            self.active_sr = sr
-                            self.active_out_sr = sr
-                            self.active_block = blk if blk > 0 else blocksize
+            def _check_in(sr_val: int, ch_val: int) -> bool:
+                key = (sr_val, ch_val)
+                if key not in in_ok_cache:
+                    try:
+                        sd.check_input_settings(device=in_idx, channels=ch_val, samplerate=sr_val, dtype="float32")
+                        in_ok_cache[key] = True
+                    except Exception:
+                        in_ok_cache[key] = False
+                return in_ok_cache[key]
 
-                            def duplex_cb(indata, outdata, frames, time_info, status):
-                                mono = indata[:, 0] if indata.ndim > 1 else indata
-                                processed = self.dsp.process(mono)
-                                for c in range(outdata.shape[1]):
-                                    outdata[:, c] = processed
-                                if self.monitor_enabled:
-                                    mon_chunk = _resample_linear(processed, sr, self.active_mon_sr)
-                                    self._mon_fifo.push(mon_chunk)
+            def _check_out(sr_val: int, ch_val: int) -> bool:
+                key = (sr_val, ch_val)
+                if key not in out_ok_cache:
+                    try:
+                        sd.check_output_settings(device=out_idx, channels=ch_val, samplerate=sr_val, dtype="float32")
+                        out_ok_cache[key] = True
+                    except Exception:
+                        out_ok_cache[key] = False
+                return out_ok_cache[key]
 
-                            self._stream = sd.Stream(
-                                device=(in_idx, out_idx),
-                                samplerate=sr,
-                                blocksize=blk,
-                                channels=(in_ch, out_ch),
-                                dtype="float32",
-                                latency="low",
-                                callback=duplex_cb,
-                            )
-                            self._stream.start()
-                            self.running = True
-                            eff_blk = blk if blk > 0 else blocksize
-                            msg = f"Ativo: {sr} Hz | Bloco {eff_blk} (~{eff_blk * 1000 / sr:.1f} ms)"
-                            if self.monitor_enabled and monitor_idx is not None:
-                                mon_err = self._start_monitor(monitor_idx, sr, blk)
-                                if mon_err:
-                                    msg += f" | Monitor off: {mon_err}"
-                            return True, msg
-                        except Exception as e:
-                            last_err = str(e)
-                            if self._stream is not None:
-                                try:
-                                    self._stream.close()
-                                except Exception:
-                                    pass
-                                self._stream = None
+            last_err = ""
+            # 1. Tenta stream duplex (menor latência quando Entrada e Saída aceitam a mesma taxa)
+            for blk in block_opts:
+                for sr in shared_srs:
+                    for in_ch in in_ch_opts:
+                        if self._abort_event.is_set():
+                            return False, "Interrompido"
+                        if not _check_in(sr, in_ch):
+                            continue
+                        for out_ch in out_ch_opts:
+                            if self._abort_event.is_set():
+                                return False, "Interrompido"
+                            if not _check_out(sr, out_ch):
+                                continue
+                            try:
+                                self.dsp.set_sample_rate(sr)
+                                self.active_sr = sr
+                                self.active_out_sr = sr
+                                self.active_block = blk if blk > 0 else blocksize
 
-        # 2. Fallback: dois streams separados com taxa independente + resampling automático
-        in_configs = self._find_supported_configs(in_idx, is_input=True, preferred_srs=[in_def, 48000, 44100])
-        out_configs = self._find_supported_configs(out_idx, is_input=False, preferred_srs=[out_def, 48000, 44100])
+                                def duplex_cb(indata, outdata, frames, time_info, status):
+                                    mono = indata[:, 0] if indata.ndim > 1 else indata
+                                    processed = self.dsp.process(mono)
+                                    if outdata.shape[1] == 1:
+                                        outdata[:, 0] = processed
+                                    else:
+                                        outdata[:] = processed[:, None]
+                                    if self.monitor_enabled:
+                                        mon_chunk = _resample_linear(processed, sr, self.active_mon_sr)
+                                        self._mon_fifo.push(mon_chunk)
 
-        # Prioriza pares com mesma taxa primeiro, depois pares com resampling
-        paired_configs: list[tuple[tuple[int, int], tuple[int, int]]] = []
-        for ic in in_configs:
-            for oc in out_configs:
-                if ic[0] == oc[0]:
-                    paired_configs.append((ic, oc))
-        for ic in in_configs:
-            for oc in out_configs:
-                if ic[0] != oc[0]:
-                    paired_configs.append((ic, oc))
+                                self._stream = sd.Stream(
+                                    device=(in_idx, out_idx),
+                                    samplerate=sr,
+                                    blocksize=blk,
+                                    channels=(in_ch, out_ch),
+                                    dtype="float32",
+                                    latency="low",
+                                    callback=duplex_cb,
+                                )
+                                self._stream.start()
+                                self.running = True
+                                eff_blk = blk if blk > 0 else blocksize
+                                msg = f"Ativo: {sr} Hz | Bloco {eff_blk} (~{eff_blk * 1000 / sr:.1f} ms)"
+                                if self.monitor_enabled and monitor_idx is not None:
+                                    mon_err = self._start_monitor(monitor_idx, sr, blk)
+                                    if mon_err:
+                                        msg += f" | Monitor off: {mon_err}"
+                                return True, msg
+                            except Exception as e:
+                                last_err = str(e)
+                                if self._stream is not None:
+                                    try:
+                                        self._stream.close()
+                                    except Exception:
+                                        pass
+                                    self._stream = None
 
-        for blk in block_opts:
-            for (in_sr, in_ch), (out_sr, out_ch) in paired_configs:
-                try:
-                    self.dsp.set_sample_rate(in_sr)
-                    self.active_sr = in_sr
-                    self.active_out_sr = out_sr
-                    self.active_block = blk if blk > 0 else blocksize
-                    self._bridge_fifo.clear()
+            if self._abort_event.is_set():
+                return False, "Interrompido"
 
-                    def in_cb(indata, frames, time_info, status):
-                        mono = indata[:, 0] if indata.ndim > 1 else indata
-                        processed = self.dsp.process(mono)
-                        out_chunk = _resample_linear(processed, in_sr, out_sr)
-                        self._bridge_fifo.push(out_chunk)
-                        if self.monitor_enabled:
-                            mon_chunk = _resample_linear(processed, in_sr, self.active_mon_sr)
-                            self._mon_fifo.push(mon_chunk)
+            # 2. Fallback: dois streams separados com taxa independente + resampling automático
+            in_configs = self._find_supported_configs(
+                in_idx, is_input=True, preferred_srs=[in_def, 48000, 44100], abort_event=self._abort_event
+            )
+            out_configs = self._find_supported_configs(
+                out_idx, is_input=False, preferred_srs=[out_def, 48000, 44100], abort_event=self._abort_event
+            )
 
-                    def out_cb(outdata, frames, time_info, status):
-                        out_buf = self._bridge_fifo.pop(frames)
-                        for ch in range(outdata.shape[1]):
-                            outdata[:, ch] = out_buf
+            paired_configs: list[tuple[tuple[int, int], tuple[int, int]]] = []
+            for ic in in_configs:
+                for oc in out_configs:
+                    if ic[0] == oc[0]:
+                        paired_configs.append((ic, oc))
+            for ic in in_configs:
+                for oc in out_configs:
+                    if ic[0] != oc[0]:
+                        paired_configs.append((ic, oc))
 
-                    self._in_stream = sd.InputStream(
-                        device=in_idx,
-                        samplerate=in_sr,
-                        blocksize=blk,
-                        channels=in_ch,
-                        dtype="float32",
-                        latency="low",
-                        callback=in_cb,
-                    )
-                    self._out_stream = sd.OutputStream(
-                        device=out_idx,
-                        samplerate=out_sr,
-                        blocksize=blk,
-                        channels=out_ch,
-                        dtype="float32",
-                        latency="low",
-                        callback=out_cb,
-                    )
-                    self._in_stream.start()
-                    self._out_stream.start()
-                    self.running = True
-                    sr_txt = f"{in_sr} Hz" if in_sr == out_sr else f"{in_sr}→{out_sr} Hz"
-                    eff_blk = blk if blk > 0 else blocksize
-                    msg = f"Ativo (Ponte): {sr_txt} | Bloco {eff_blk}"
-                    if self.monitor_enabled and monitor_idx is not None:
-                        mon_err = self._start_monitor(monitor_idx, out_sr, blk)
-                        if mon_err:
-                            msg += f" | Monitor off: {mon_err}"
-                    return True, msg
-                except Exception as e:
-                    last_err = str(e)
-                    self.stop()
+            for blk in block_opts:
+                for (in_sr, in_ch), (out_sr, out_ch) in paired_configs:
+                    if self._abort_event.is_set():
+                        return False, "Interrompido"
+                    try:
+                        self.dsp.set_sample_rate(in_sr)
+                        self.active_sr = in_sr
+                        self.active_out_sr = out_sr
+                        self.active_block = blk if blk > 0 else blocksize
+                        self._bridge_fifo.clear()
 
-        return False, f"Falha ao iniciar áudio: {last_err}"
+                        def in_cb(indata, frames, time_info, status):
+                            mono = indata[:, 0] if indata.ndim > 1 else indata
+                            processed = self.dsp.process(mono)
+                            out_chunk = _resample_linear(processed, in_sr, out_sr)
+                            self._bridge_fifo.push(out_chunk)
+                            if self.monitor_enabled:
+                                mon_chunk = _resample_linear(processed, in_sr, self.active_mon_sr)
+                                self._mon_fifo.push(mon_chunk)
+
+                        def out_cb(outdata, frames, time_info, status):
+                            out_buf = self._bridge_fifo.pop(frames)
+                            if outdata.shape[1] == 1:
+                                outdata[:, 0] = out_buf
+                            else:
+                                outdata[:] = out_buf[:, None]
+
+                        self._in_stream = sd.InputStream(
+                            device=in_idx,
+                            samplerate=in_sr,
+                            blocksize=blk,
+                            channels=in_ch,
+                            dtype="float32",
+                            latency="low",
+                            callback=in_cb,
+                        )
+                        self._out_stream = sd.OutputStream(
+                            device=out_idx,
+                            samplerate=out_sr,
+                            blocksize=blk,
+                            channels=out_ch,
+                            dtype="float32",
+                            latency="low",
+                            callback=out_cb,
+                        )
+                        self._in_stream.start()
+                        self._out_stream.start()
+                        self.running = True
+                        sr_txt = f"{in_sr} Hz" if in_sr == out_sr else f"{in_sr}→{out_sr} Hz"
+                        eff_blk = blk if blk > 0 else blocksize
+                        msg = f"Ativo (Ponte): {sr_txt} | Bloco {eff_blk}"
+                        if self.monitor_enabled and monitor_idx is not None:
+                            mon_err = self._start_monitor(monitor_idx, out_sr, blk)
+                            if mon_err:
+                                msg += f" | Monitor off: {mon_err}"
+                        return True, msg
+                    except Exception as e:
+                        last_err = str(e)
+                        self._stop_unlocked()
+
+            return False, f"Falha ao iniciar áudio: {last_err}"
 
     def _start_monitor(self, monitor_idx: int, preferred_sr: int, blocksize: int) -> str | None:
-        configs = self._find_supported_configs(monitor_idx, is_input=False, preferred_srs=[preferred_sr, 48000, 44100])
+        configs = self._find_supported_configs(
+            monitor_idx, is_input=False, preferred_srs=[preferred_sr, 48000, 44100], abort_event=self._abort_event
+        )
         last_err = ""
         for blk in ([blocksize, 0] if blocksize > 0 else [0]):
             for mon_sr, ch in configs:
+                if self._abort_event.is_set():
+                    return "Interrompido"
                 try:
                     self.active_mon_sr = mon_sr
                     self._mon_fifo.clear()
 
                     def mon_cb(outdata, frames, time_info, status):
                         chunk = self._mon_fifo.pop(frames)
-                        for c in range(outdata.shape[1]):
-                            outdata[:, c] = chunk
+                        if outdata.shape[1] == 1:
+                            outdata[:, 0] = chunk
+                        else:
+                            outdata[:] = chunk[:, None]
 
                     self._mon_stream = sd.OutputStream(
                         device=monitor_idx,
@@ -368,18 +432,27 @@ class AudioRouter:
                         self._mon_stream = None
         return last_err or "Erro no monitor"
 
-    def stop(self):
+    def _stop_unlocked(self):
         self.running = False
-        for s in (self._stream, self._in_stream, self._out_stream, self._mon_stream):
-            if s is not None:
-                try:
-                    s.stop()
-                    s.close()
-                except Exception:
-                    pass
+        streams = (self._stream, self._in_stream, self._out_stream, self._mon_stream)
         self._stream = None
         self._in_stream = None
         self._out_stream = None
         self._mon_stream = None
+        for s in streams:
+            if s is not None:
+                try:
+                    s.stop()
+                except Exception:
+                    pass
+                try:
+                    s.close()
+                except Exception:
+                    pass
         self._bridge_fifo.clear()
         self._mon_fifo.clear()
+
+    def stop(self):
+        self._abort_event.set()
+        with self._op_lock:
+            self._stop_unlocked()

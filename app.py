@@ -41,7 +41,7 @@ from i18n import (
     tr,
 )
 
-GITHUB_REPO = "CakeSweet/voxcraft_studio"
+GITHUB_REPO = "CakeSweet/voxcraft"
 APP_VERSION = "2.1.0"
 
 IS_FROZEN = bool(getattr(sys, "frozen", False))
@@ -381,7 +381,16 @@ class VoxCraftApp(ctk.CTk):
             "splash": ctk.CTkFont(size=22, weight="bold"),
         }
 
-        # Cache de estado da UI para evitar redesenhos desnecessários e travamentos ao restaurar/maximizar
+        # Cache de estado da UI e controle assíncrono de áudio (evita congelamentos/tela branca)
+        self._audio_op_seq = 0
+        self._audio_worker_lock = threading.Lock()
+        self._update_win = None
+        self._discord_win = None
+        self._wave_mid_id = None
+        self._wave_line_id = None
+        self._wave_cached_w = 0
+        self._wave_cached_len = 0
+        self._wave_xs = None
         self._last_in_norm = -1.0
         self._last_out_norm = -1.0
         self._last_gate_open: bool | None = None
@@ -804,6 +813,8 @@ class VoxCraftApp(ctk.CTk):
             self.builtin_presets = get_builtin_presets()
             self.user_presets = load_user_presets()
             self.app_config = load_app_config()
+            if str(self.app_config.get("github_repo", "")).strip().lower() == "cakesweet/voxcraft_studio":
+                self.app_config["github_repo"] = GITHUB_REPO
             cfg_theme = str(self.app_config.get("theme", self.ui_theme)).strip().lower()
             if cfg_theme in ("dark", "oled", "light"):
                 self.ui_theme = cfg_theme
@@ -848,7 +859,7 @@ class VoxCraftApp(ctk.CTk):
             self._restore_saved_ui_prefs()
             self._refresh_devices(reinit_backend=False, initial_load=True)
 
-            saved_preset = self._preset_to_internal(str(self.app_config.get("last_preset", "Normal (Limpo + Gate)")))
+            saved_preset = self._preset_to_internal(str(self.app_config.get("last_preset", "Normal")))
             if saved_preset in self.builtin_presets:
                 self.preset_var.set(self._preset_to_display(saved_preset))
                 self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True)
@@ -856,8 +867,8 @@ class VoxCraftApp(ctk.CTk):
                 self.preset_var.set(f"★ {saved_preset}")
                 self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True)
             else:
-                self.preset_var.set(self._preset_to_display("Normal (Limpo + Gate)"))
-                self._apply_preset("Normal (Limpo + Gate)", save_cfg=False, preserve_bypass=True)
+                self.preset_var.set(self._preset_to_display("Normal"))
+                self._apply_preset("Normal", save_cfg=False, preserve_bypass=True)
 
             if self.app_config.pop("pending_update_restore", False):
                 raw_params = self.app_config.pop("current_params", None)
@@ -969,20 +980,57 @@ class VoxCraftApp(ctk.CTk):
         if pil_img is None:
             return
 
+        def _post_ui(fn):
+            try:
+                if not self._is_quitting:
+                    self.after(0, fn)
+            except Exception:
+                pass
+
         def on_show(icon, item):
-            self.after(0, self._restore_from_tray)
+            _post_ui(self._restore_from_tray)
 
         def on_toggle_audio(icon, item):
-            self.after(0, self._toggle_audio)
+            _post_ui(self._toggle_audio)
 
         def on_toggle_bypass(icon, item):
             def _flip():
                 self.bypass_var.set(not self.bypass_var.get())
                 self._on_param_change()
-            self.after(0, _flip)
+            _post_ui(_flip)
 
         def on_quit(icon, item):
-            self.after(0, self._quit_app)
+            self._is_quitting = True
+            router = getattr(self, "router", None)
+            if router is not None:
+                try:
+                    router.abort_start()
+                except Exception:
+                    pass
+            try:
+                self.after(0, self._quit_app)
+            except Exception:
+                pass
+
+            def _watchdog():
+                time.sleep(1.3)
+                try:
+                    if router is not None:
+                        router.stop()
+                except Exception:
+                    pass
+                try:
+                    icon.stop()
+                except Exception:
+                    pass
+                try:
+                    if _SINGLE_INSTANCE is not None:
+                        _SINGLE_INSTANCE.release()
+                except Exception:
+                    pass
+                os._exit(0)
+
+            threading.Thread(target=_watchdog, daemon=True).start()
 
         menu = pystray.Menu(
             pystray.MenuItem(self._t("tray_open"), on_show, default=True),
@@ -999,24 +1047,29 @@ class VoxCraftApp(ctk.CTk):
             pystray.MenuItem(self._t("tray_quit"), on_quit),
         )
 
-        self._tray_icon = pystray.Icon("voxcraft_studio", pil_img, "VoxCraft Studio", menu)
+        self._tray_icon = pystray.Icon("voxcraft", pil_img, "VoxCraft Studio", menu)
         self._tray_thread = threading.Thread(target=self._tray_icon.run, daemon=True)
         self._tray_thread.start()
 
     def _restart_tray_icon(self):
-        if self._tray_icon is not None:
-            try:
-                self._tray_icon.stop()
-            except Exception:
-                pass
-            self._tray_icon = None
+        old_icon = self._tray_icon
+        self._tray_icon = None
+        if old_icon is not None:
+            threading.Thread(target=lambda: old_icon.stop(), daemon=True).start()
         self._start_tray_icon()
 
     def _restore_from_tray(self):
-        self.deiconify()
-        self.state("normal")
-        self.lift()
-        self.focus_force()
+        if self._is_quitting:
+            return
+        try:
+            self.deiconify()
+            self.state("normal")
+            self.lift()
+            self.attributes("-topmost", True)
+            self.after(70, lambda: self.winfo_exists() and self.attributes("-topmost", False))
+            self.focus_force()
+        except Exception:
+            pass
         self._on_window_map()
 
     def _minimize_to_tray(self):
@@ -1057,7 +1110,7 @@ class VoxCraftApp(ctk.CTk):
         preset_box.pack(side="left", padx=6)
         self._lbl(preset_box, "preset", font_key="sm", color_role="text_muted").pack(side="left", padx=(0, 8))
 
-        self.preset_var = ctk.StringVar(value=self._preset_to_display("Normal (Limpo + Gate)"))
+        self.preset_var = ctk.StringVar(value=self._preset_to_display("Normal"))
         self.preset_menu = self._optmenu(
             preset_box,
             variable=self.preset_var,
@@ -1340,7 +1393,7 @@ class VoxCraftApp(ctk.CTk):
         )
 
         self.input_gain_var = self._add_slider(dyn_card, "input_gain", -18.0, 24.0, 0.0, "dB")
-        self.gate_en_var = ctk.BooleanVar(value=True)
+        self.gate_en_var = ctk.BooleanVar(value=False)
         self._switch(dyn_card, "noise_gate", self.gate_en_var, self._on_param_change).pack(
             anchor="w", padx=12, pady=(6, 0)
         )
@@ -1732,7 +1785,7 @@ class VoxCraftApp(ctk.CTk):
         self._btn(
             box,
             "reset_effects",
-            lambda: self._apply_preset("Normal (Limpo + Gate)"),
+            lambda: self._apply_preset("Normal"),
             hover_override="#dc2626",
             corner_radius=8,
             height=34,
@@ -1941,7 +1994,7 @@ class VoxCraftApp(ctk.CTk):
         )
         if eq_sig != self._last_eq_sig:
             self._last_eq_sig = eq_sig
-            self._draw_eq_curve()
+            self._schedule_eq_redraw()
 
     def _load_params_to_ui(self, p: DSPParams, preserve_bypass: bool = False):
         self._syncing_ui = True
@@ -2120,8 +2173,8 @@ class VoxCraftApp(ctk.CTk):
             del self.user_presets[name]
             save_user_presets(self.user_presets)
             self.preset_menu.configure(values=self._all_preset_names())
-            self.preset_var.set(self._preset_to_display("Normal (Limpo + Gate)"))
-            self._apply_preset("Normal (Limpo + Gate)")
+            self.preset_var.set(self._preset_to_display("Normal"))
+            self._apply_preset("Normal")
 
     # ------------------------------------------------------------------ #
     # Persistência de Entradas, Saídas e Preferências
@@ -2233,18 +2286,17 @@ class VoxCraftApp(ctk.CTk):
 
         return fallback_fn(labels)
 
-    def _refresh_devices(self, reinit_backend: bool = True, initial_load: bool = False):
-        was_running = self.router.running
-        prev_in = self._selected_device_item(self.in_dev_var.get(), self.in_devices)
-        prev_out = self._selected_device_item(self.out_dev_var.get(), self.out_devices)
-        prev_mon = self._selected_device_item(self.mon_dev_var.get(), self.out_devices)
-
-        if reinit_backend:
-            if was_running:
-                self.router.stop()
-            self.in_devices, self.out_devices = AudioRouter.refresh_backend()
-        else:
-            self.in_devices, self.out_devices = AudioRouter.list_devices()
+    def _apply_device_list_to_ui(
+        self,
+        in_devices: list[AudioDeviceItem],
+        out_devices: list[AudioDeviceItem],
+        prev_in: AudioDeviceItem | None,
+        prev_out: AudioDeviceItem | None,
+        prev_mon: AudioDeviceItem | None,
+        was_running: bool,
+        initial_load: bool,
+    ):
+        self.in_devices, self.out_devices = in_devices, out_devices
 
         in_labels = [d.label for d in self.in_devices] or [self._t("no_mic")]
         out_labels = [d.label for d in self.out_devices] or [self._t("no_out")]
@@ -2288,6 +2340,41 @@ class VoxCraftApp(ctk.CTk):
                 text_color=self._c()["accent"],
             )
 
+    def _refresh_devices(self, reinit_backend: bool = True, initial_load: bool = False):
+        was_running = self.router.running
+        prev_in = self._selected_device_item(self.in_dev_var.get(), self.in_devices)
+        prev_out = self._selected_device_item(self.out_dev_var.get(), self.out_devices)
+        prev_mon = self._selected_device_item(self.mon_dev_var.get(), self.out_devices)
+
+        if not reinit_backend:
+            in_devs, out_devs = AudioRouter.list_devices()
+            self._apply_device_list_to_ui(in_devs, out_devs, prev_in, prev_out, prev_mon, was_running, initial_load)
+            return
+
+        self._audio_op_seq += 1
+        op_seq = self._audio_op_seq
+        self.router.abort_start()
+        self.status_lbl.configure(text=self._t("refreshing_devices"), text_color=self._c()["accent"])
+        self.power_btn.configure(text=self._t("start_audio"), fg_color="#059669", hover_color="#10b981")
+
+        def _worker():
+            with self._audio_worker_lock:
+                if was_running or self.router.running:
+                    self.router.stop()
+                in_devs, out_devs = AudioRouter.refresh_backend()
+
+            def _done():
+                if self._is_quitting or op_seq != self._audio_op_seq:
+                    return
+                self._apply_device_list_to_ui(in_devs, out_devs, prev_in, prev_out, prev_mon, was_running, initial_load)
+
+            try:
+                self.after(0, _done)
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _selected_device_item(self, label: str, items: list[AudioDeviceItem]) -> AudioDeviceItem | None:
         for d in items:
             if d.label == label:
@@ -2306,11 +2393,21 @@ class VoxCraftApp(ctk.CTk):
             return 1024
         return 512
 
+    def _stop_audio_async(self):
+        self._audio_op_seq += 1
+        self.router.abort_start()
+        self.power_btn.configure(text=self._t("start_audio"), fg_color="#059669", hover_color="#10b981")
+        self.status_lbl.configure(text=self._t("stopped"), text_color=self._c()["text_muted"])
+
+        def _worker():
+            with self._audio_worker_lock:
+                self.router.stop()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _toggle_audio(self):
         if self.router.running:
-            self.router.stop()
-            self.power_btn.configure(text=self._t("start_audio"), fg_color="#059669", hover_color="#10b981")
-            self.status_lbl.configure(text=self._t("stopped"), text_color=self._c()["text_muted"])
+            self._stop_audio_async()
         else:
             self._start_audio()
 
@@ -2323,20 +2420,60 @@ class VoxCraftApp(ctk.CTk):
             messagebox.showerror(self._t("err_title"), self._t("err_invalid_devs"))
             return
 
-        ok, msg = self.router.start(
-            in_idx=in_idx,
-            out_idx=out_idx,
-            blocksize=self._get_blocksize(),
-            monitor_enabled=bool(self.monitor_var.get()),
-            monitor_idx=mon_idx,
-        )
-        if ok:
-            self.power_btn.configure(text=self._t("stop_audio"), fg_color="#dc2626", hover_color="#ef4444")
-            self.status_lbl.configure(text=msg, text_color="#10b981")
-            self._draw_eq_curve()
-        else:
-            messagebox.showerror(self._t("err_audio_title"), msg)
-            self.status_lbl.configure(text=msg, text_color="#ef4444")
+        self._audio_op_seq += 1
+        op_seq = self._audio_op_seq
+        blocksize = self._get_blocksize()
+        mon_en = bool(self.monitor_var.get())
+
+        self.router.abort_start()
+        self.status_lbl.configure(text=self._t("connecting_audio"), text_color=self._c()["accent"])
+
+        def _worker():
+            ok, msg = False, "Interrompido"
+            with self._audio_worker_lock:
+                if self._is_quitting or op_seq != self._audio_op_seq:
+                    return
+                try:
+                    ok, msg = self.router.start(
+                        in_idx=in_idx,
+                        out_idx=out_idx,
+                        blocksize=blocksize,
+                        monitor_enabled=mon_en,
+                        monitor_idx=mon_idx,
+                    )
+                except Exception as exc:
+                    ok, msg = False, str(exc)
+
+            def _done():
+                if self._is_quitting or op_seq != self._audio_op_seq:
+                    if ok:
+                        threading.Thread(target=self.router.stop, daemon=True).start()
+                    return
+                if ok:
+                    self.power_btn.configure(text=self._t("stop_audio"), fg_color="#dc2626", hover_color="#ef4444")
+                    self.status_lbl.configure(text=msg, text_color="#10b981")
+                    self._schedule_eq_redraw()
+                    if self._ui_loop_job is not None:
+                        try:
+                            self.after_cancel(self._ui_loop_job)
+                        except Exception:
+                            pass
+                        self._ui_loop_job = None
+                    self._ui_loop_job = self.after(20, self._schedule_ui_loop)
+                else:
+                    self.power_btn.configure(text=self._t("start_audio"), fg_color="#059669", hover_color="#10b981")
+                    if msg != "Interrompido":
+                        messagebox.showerror(self._t("err_audio_title"), msg)
+                        self.status_lbl.configure(text=msg, text_color="#ef4444")
+                    else:
+                        self.status_lbl.configure(text=self._t("stopped"), text_color=self._c()["text_muted"])
+
+            try:
+                self.after(0, _done)
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _restart_if_running(self):
         if self.router.running:
@@ -2351,11 +2488,11 @@ class VoxCraftApp(ctk.CTk):
                 self.after_cancel(self._eq_redraw_job)
             except Exception:
                 pass
-        self._eq_redraw_job = self.after(45, self._draw_eq_curve)
+        self._eq_redraw_job = self.after(35, self._draw_eq_curve)
 
     def _draw_eq_curve(self):
         self._eq_redraw_job = None
-        if self._rebuilding_ui:
+        if self._rebuilding_ui or self._is_quitting:
             return
         try:
             if self.state() == "iconic":
@@ -2381,8 +2518,9 @@ class VoxCraftApp(ctk.CTk):
 
         # Grade logarítmica de frequências (20 Hz -> 20 kHz)
         f_min, f_max = 20.0, 20000.0
+        log_span = np.log10(f_max / f_min)
         for f in (30, 60, 120, 250, 500, 1000, 2000, 4000, 8000, 16000):
-            x = pad_x + (np.log10(f / f_min) / np.log10(f_max / f_min)) * gw
+            x = pad_x + (np.log10(f / f_min) / log_span) * gw
             c.create_line(x, pad_y, x, h - pad_y, fill=th["grid_line"])
             lbl = f"{f // 1000}k" if f >= 1000 else str(f)
             c.create_text(x, h - 5, text=lbl, fill=th["grid_text"], font=("Segoe UI", 8))
@@ -2395,17 +2533,13 @@ class VoxCraftApp(ctk.CTk):
 
         sr = self.dsp.sr
         sos = build_eq_sos(self.params, sr)
-        freqs = np.logspace(np.log10(f_min), np.log10(min(f_max, sr * 0.48)), 220)
+        freqs = np.logspace(np.log10(f_min), np.log10(min(f_max, sr * 0.48)), 160)
         _, resp = signal.sosfreqz(sos, worN=freqs, fs=sr)
-        db_resp = 20.0 * np.log10(np.maximum(np.abs(resp), 1e-5))
-        db_resp = np.clip(db_resp, -20.0, 20.0)
+        db_resp = np.clip(20.0 * np.log10(np.maximum(np.abs(resp), 1e-5)), -20.0, 20.0)
 
-        pts = []
-        for f, db in zip(freqs, db_resp):
-            x = pad_x + (np.log10(f / f_min) / np.log10(f_max / f_min)) * gw
-            y = pad_y + (18.0 - db) / 36.0 * gh
-            y = np.clip(y, pad_y, h - pad_y)
-            pts.extend([float(x), float(y)])
+        xs = pad_x + (np.log10(freqs / f_min) / log_span) * gw
+        ys = np.clip(pad_y + (18.0 - db_resp) / 36.0 * gh, pad_y, h - pad_y)
+        pts = np.column_stack((xs, ys)).ravel().tolist()
 
         if len(pts) >= 4:
             c.create_line(*pts, fill=th["accent"], width=2, smooth=True)
@@ -2414,7 +2548,6 @@ class VoxCraftApp(ctk.CTk):
         self._ui_loop_job = None
         if self._is_quitting or self._rebuilding_ui:
             return
-        # Pausa redesenhos quando minimizado ou oculto na bandeja (evita travamento ao restaurar/maximizar)
         try:
             is_hidden = (self.state() == "iconic") or (not self.winfo_viewable())
         except Exception:
@@ -2425,54 +2558,67 @@ class VoxCraftApp(ctk.CTk):
             self._ui_loop_job = self.after(220, self._schedule_ui_loop)
             return
 
-        th = self._c()
-        force_refresh = self._last_ui_hidden
-        self._last_ui_hidden = False
+        next_ms = 110
+        try:
+            th = self._c()
+            force_refresh = self._last_ui_hidden
+            self._last_ui_hidden = False
 
-        # Atualiza VU meters apenas se houve variação visível
-        in_norm = max(0.0, min(1.0, (self.dsp.input_peak_db + 60.0) / 60.0))
-        out_norm = max(0.0, min(1.0, (self.dsp.output_peak_db + 60.0) / 60.0))
-        if force_refresh or abs(in_norm - self._last_in_norm) >= 0.005:
-            self._last_in_norm = in_norm
-            self.in_bar.set(in_norm)
-        if force_refresh or abs(out_norm - self._last_out_norm) >= 0.005:
-            self._last_out_norm = out_norm
-            self.out_bar.set(out_norm)
+            # Atualiza VU meters apenas se houve variação visível
+            in_norm = max(0.0, min(1.0, (self.dsp.input_peak_db + 60.0) / 60.0))
+            out_norm = max(0.0, min(1.0, (self.dsp.output_peak_db + 60.0) / 60.0))
+            if force_refresh or abs(in_norm - self._last_in_norm) >= 0.005:
+                self._last_in_norm = in_norm
+                self.in_bar.set(in_norm)
+            if force_refresh or abs(out_norm - self._last_out_norm) >= 0.005:
+                self._last_out_norm = out_norm
+                self.out_bar.set(out_norm)
 
-        gate_open = bool(self.dsp.gate_is_open)
-        if force_refresh or gate_open != self._last_gate_open:
-            self._last_gate_open = gate_open
-            if gate_open:
-                self.gate_led.configure(text=self._t("gate_open"), text_color="#10b981")
+            gate_open = bool(self.dsp.gate_is_open)
+            if force_refresh or gate_open != self._last_gate_open:
+                self._last_gate_open = gate_open
+                if gate_open:
+                    self.gate_led.configure(text=self._t("gate_open"), text_color="#10b981")
+                else:
+                    self.gate_led.configure(text=self._t("gate_closed"), text_color="#f59e0b")
+
+            # Osciloscópio sem delete("all"): reutiliza os mesmos itens do Canvas (zero GDI/Tk churn)
+            wc = self.wave_canvas
+            ww = max(200, wc.winfo_width())
+            wh = max(50, wc.winfo_height())
+            mid = wh / 2.0
+            if self._wave_mid_id is None:
+                self._wave_mid_id = wc.create_line(0, mid, ww, mid, fill=th["control_bg"])
             else:
-                self.gate_led.configure(text=self._t("gate_closed"), text_color="#f59e0b")
+                wc.coords(self._wave_mid_id, 0, mid, ww, mid)
+                wc.itemconfigure(self._wave_mid_id, fill=th["control_bg"])
 
-        # Desenha Osciloscópio apenas quando rodando (ou 1x quando parado)
-        wc = self.wave_canvas
-        wave = self.dsp.last_waveform
-        if self.router.running and len(wave) > 1:
-            self._last_wave_idle = False
-            ww = max(200, wc.winfo_width())
-            wh = max(50, wc.winfo_height())
-            wc.delete("all")
-            mid = wh / 2.0
-            wc.create_line(0, mid, ww, mid, fill=th["control_bg"])
-            xs = np.linspace(0, ww, len(wave))
-            ys = mid - np.clip(wave, -1.0, 1.0) * (mid - 4)
-            pts = []
-            for xv, yv in zip(xs, ys):
-                pts.extend([float(xv), float(yv)])
-            color = "#f59e0b" if self.params.bypass else th["accent"]
-            wc.create_line(*pts, fill=color, width=2)
-        elif force_refresh or not self._last_wave_idle:
-            self._last_wave_idle = True
-            ww = max(200, wc.winfo_width())
-            wh = max(50, wc.winfo_height())
-            wc.delete("all")
-            mid = wh / 2.0
-            wc.create_line(0, mid, ww, mid, fill=th["control_bg"])
+            wave = self.dsp.last_waveform
+            if self.router.running and len(wave) > 1:
+                self._last_wave_idle = False
+                n_w = len(wave)
+                if self._wave_xs is None or self._wave_cached_w != ww or self._wave_cached_len != n_w:
+                    self._wave_xs = np.linspace(0.0, float(ww), n_w)
+                    self._wave_cached_w = ww
+                    self._wave_cached_len = n_w
+                ys = mid - np.clip(wave, -1.0, 1.0) * (mid - 4.0)
+                pts = np.column_stack((self._wave_xs, ys)).ravel().tolist()
+                color = "#f59e0b" if self.params.bypass else th["accent"]
+                if self._wave_line_id is None:
+                    self._wave_line_id = wc.create_line(*pts, fill=color, width=2)
+                else:
+                    wc.coords(self._wave_line_id, *pts)
+                    wc.itemconfigure(self._wave_line_id, fill=color, state="normal")
+                next_ms = 33
+            elif force_refresh or not self._last_wave_idle:
+                self._last_wave_idle = True
+                if self._wave_line_id is not None:
+                    wc.itemconfigure(self._wave_line_id, state="hidden")
+        except Exception:
+            next_ms = 120
 
-        self._ui_loop_job = self.after(33, self._schedule_ui_loop)
+        if not self._is_quitting:
+            self._ui_loop_job = self.after(next_ms, self._schedule_ui_loop)
 
     # ------------------------------------------------------------------ #
     # Atualização do Aplicativo (Git / GitHub / .zip Local)
@@ -2536,19 +2682,22 @@ class VoxCraftApp(ctk.CTk):
         return {"version": ver_raw, "tag": tag, "commit": commit}
 
     def _detect_github_repo(self) -> str:
-        saved = str((self.app_config or {}).get("github_repo", "")).strip()
-        if saved and "/" in saved:
-            return saved.strip("/").removesuffix(".git")
+        legacy_slugs = {"cakesweet/voxcraft_studio"}
+        saved = str((self.app_config or {}).get("github_repo", "")).strip().strip("/").removesuffix(".git")
+        if saved and "/" in saved and saved.lower() not in legacy_slugs:
+            return saved
         binfo = self._read_build_info()
-        ci_repo = str(binfo.get("repo", "")).strip()
-        if ci_repo and "/" in ci_repo:
-            return ci_repo.strip("/").removesuffix(".git")
+        ci_repo = str(binfo.get("repo", "")).strip().strip("/").removesuffix(".git")
+        if ci_repo and "/" in ci_repo and ci_repo.lower() not in legacy_slugs:
+            return ci_repo
         if os.path.isdir(os.path.join(BASE_DIR, ".git")) and shutil.which("git"):
             rc, url = self._run_cmd(["git", "config", "--get", "remote.origin.url"], BASE_DIR)
             if rc == 0 and url:
                 m = re.search(r"github\.com[:/]([^/]+/[^/.\s]+)", url)
                 if m:
-                    return m.group(1).removesuffix(".git")
+                    found = m.group(1).removesuffix(".git")
+                    if found.lower() not in legacy_slugs:
+                        return found
         return GITHUB_REPO
 
     @staticmethod
@@ -2628,11 +2777,24 @@ class VoxCraftApp(ctk.CTk):
     def _start_app_update(self):
         # Salva imediatamente entradas, saídas, preset, atalho e parâmetros atuais
         self._save_config(include_params=True)
+
+        existing = getattr(self, "_update_win", None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.deiconify()
+                    existing.lift()
+                    existing.focus_force()
+                    return
+            except Exception:
+                pass
+
         th = self._c()
 
         win = ctk.CTkToplevel(self)
+        self._update_win = win
         win.title(self._t("upd_win_title"))
-        w, h = 580, 420
+        w, h = 580, 240
         self.update_idletasks()
         px = self.winfo_rootx() + max(0, (self.winfo_width() - w) // 2)
         py = self.winfo_rooty() + max(0, (self.winfo_height() - h) // 2)
@@ -2641,10 +2803,19 @@ class VoxCraftApp(ctk.CTk):
         win.transient(self)
         win.configure(fg_color=th["modal_bg"])
 
+        def _close_update():
+            self._update_win = None
+            try:
+                win.destroy()
+            except Exception:
+                pass
+
+        win.protocol("WM_DELETE_WINDOW", _close_update)
+
         local_id = self._get_local_build_identity()
 
         hdr_row = ctk.CTkFrame(win, fg_color="transparent")
-        hdr_row.pack(fill="x", padx=20, pady=(16, 4))
+        hdr_row.pack(fill="x", padx=20, pady=(18, 6))
         ctk.CTkLabel(
             hdr_row, text=self._t("upd_header"), font=self._fonts["h2_b"], text_color=th["accent"]
         ).pack(side="left")
@@ -2656,71 +2827,23 @@ class VoxCraftApp(ctk.CTk):
             win,
             text=self._t("upd_checking"),
             justify="left",
-            wraplength=536,
+            wraplength=540,
             font=self._fonts["sm"],
             text_color=th["text_body"],
         )
-        msg_lbl.pack(anchor="w", padx=20, pady=(6, 8))
+        msg_lbl.pack(anchor="w", padx=20, pady=(8, 12))
 
-        progress = ctk.CTkProgressBar(win, mode="indeterminate", width=536, fg_color=th["track_bg"], progress_color=th["accent"])
-        progress.pack(padx=20, pady=(2, 12))
+        progress = ctk.CTkProgressBar(win, mode="indeterminate", width=540, fg_color=th["track_bg"], progress_color=th["accent"])
+        progress.pack(padx=20, pady=(2, 16))
         progress.start()
 
-        # Configuração compacta do repositório (útil se o repo for privado ou tiver outro nome)
-        cfg_card = ctk.CTkFrame(
-            win, fg_color=th["card_bg"], corner_radius=10, border_width=1, border_color=th["card_border"]
-        )
-        cfg_card.pack(fill="x", padx=20, pady=(0, 12))
-
-        repo_var = ctk.StringVar(value=self._detect_github_repo())
-        token_var = ctk.StringVar(value=str((self.app_config or {}).get("github_token", "")))
-
-        r1 = ctk.CTkFrame(cfg_card, fg_color="transparent")
-        r1.pack(fill="x", padx=12, pady=(10, 6))
-        ctk.CTkLabel(r1, text=self._t("upd_repo"), width=92, anchor="w", font=self._fonts["xs"], text_color=th["text_muted"]).pack(side="left")
-        repo_entry = ctk.CTkEntry(
-            r1, textvariable=repo_var, height=28, corner_radius=7, fg_color=th["entry_bg"], border_color=th["control_border"], text_color=th["text_primary"], font=self._fonts["xs"]
-        )
-        repo_entry.pack(side="left", fill="x", expand=True, padx=(4, 8))
-        recheck_btn = ctk.CTkButton(
-            r1,
-            text=self._t("upd_check_btn"),
-            width=84,
-            height=28,
-            corner_radius=7,
-            fg_color=th["control_bg"],
-            hover_color="#2563eb",
-            text_color=th["text_primary"],
-            border_width=1,
-            border_color=th["control_border"],
-            font=self._fonts["xs_b"],
-        )
-        recheck_btn.pack(side="right")
-
-        r2 = ctk.CTkFrame(cfg_card, fg_color="transparent")
-        r2.pack(fill="x", padx=12, pady=(0, 10))
-        ctk.CTkLabel(r2, text=self._t("upd_token"), width=92, anchor="w", font=self._fonts["xs"], text_color=th["text_muted"]).pack(side="left")
-        token_entry = ctk.CTkEntry(
-            r2,
-            textvariable=token_var,
-            show="*",
-            placeholder_text=self._t("upd_token_ph"),
-            height=28,
-            corner_radius=7,
-            fg_color=th["entry_bg"],
-            border_color=th["control_border"],
-            text_color=th["text_primary"],
-            font=self._fonts["xs"],
-        )
-        token_entry.pack(side="left", fill="x", expand=True, padx=(4, 0))
-
         btn_row = ctk.CTkFrame(win, fg_color="transparent")
-        btn_row.pack(fill="x", padx=20, pady=(4, 14))
+        btn_row.pack(fill="x", padx=20, pady=(4, 16))
 
         action_btn = ctk.CTkButton(
             btn_row,
             text=self._t("upd_now_btn"),
-            width=185,
+            width=172,
             height=34,
             corner_radius=8,
             fg_color="#059669",
@@ -2733,7 +2856,7 @@ class VoxCraftApp(ctk.CTk):
         local_btn = ctk.CTkButton(
             btn_row,
             text=self._t("upd_local_btn"),
-            width=165,
+            width=148,
             height=34,
             corner_radius=8,
             fg_color=th["control_bg"],
@@ -2742,12 +2865,26 @@ class VoxCraftApp(ctk.CTk):
             border_width=1,
             border_color=th["control_border"],
         )
-        local_btn.pack(side="left", padx=(10, 0))
+        local_btn.pack(side="left", padx=(8, 0))
+
+        recheck_btn = ctk.CTkButton(
+            btn_row,
+            text=self._t("upd_check_btn"),
+            width=92,
+            height=34,
+            corner_radius=8,
+            fg_color=th["control_bg"],
+            hover_color="#2563eb",
+            text_color=th["text_primary"],
+            border_width=1,
+            border_color=th["control_border"],
+        )
+        recheck_btn.pack(side="left", padx=(8, 0))
 
         close_btn = ctk.CTkButton(
             btn_row,
             text=self._t("close"),
-            width=95,
+            width=90,
             height=34,
             corner_radius=8,
             fg_color=th["control_bg"],
@@ -2755,13 +2892,13 @@ class VoxCraftApp(ctk.CTk):
             text_color=th["text_primary"],
             border_width=1,
             border_color=th["control_border"],
-            command=win.destroy,
+            command=_close_update,
         )
         close_btn.pack(side="right")
 
         win.update_idletasks()
         win.lift()
-        win.after(120, lambda: win.winfo_exists() and win.grab_set())
+        win.focus_force()
 
         def safe_ui(fn):
             def _run_on_main():
@@ -2774,22 +2911,6 @@ class VoxCraftApp(ctk.CTk):
                 self.after(0, _run_on_main)
             except Exception:
                 pass
-
-        def _persist_github_prefs() -> tuple[str, str]:
-            slug = repo_var.get().strip().strip("/").removesuffix(".git")
-            if slug.startswith("https://github.com/"):
-                slug = slug[len("https://github.com/"):].strip("/")
-            tok = token_var.get().strip()
-            if slug:
-                self.app_config["github_repo"] = slug
-            else:
-                slug = self._detect_github_repo()
-            if tok:
-                self.app_config["github_token"] = tok
-            else:
-                self.app_config.pop("github_token", None)
-            self._save_config()
-            return slug, tok
 
         def _set_busy(text: str):
             safe_ui(lambda: (
@@ -2838,7 +2959,6 @@ class VoxCraftApp(ctk.CTk):
             if _SINGLE_INSTANCE is not None:
                 _SINGLE_INSTANCE.release()
             try:
-                win.grab_release()
                 win.destroy()
             except Exception:
                 pass
@@ -3004,14 +3124,11 @@ class VoxCraftApp(ctk.CTk):
 
             safe_ui(lambda p=out_path, m=release_meta: _launch_exe_installer(p, m))
 
-        def run_check(save_inputs: bool = False):
-            if save_inputs:
-                repo_slug, token = _persist_github_prefs()
-            else:
-                repo_slug = self._detect_github_repo()
-                token = str((self.app_config or {}).get("github_token", "")).strip()
+        def run_check():
+            repo_slug = self._detect_github_repo()
+            token = str((self.app_config or {}).get("github_token", "")).strip()
 
-            _set_busy(self._t("upd_consulting", repo=repo_slug))
+            _set_busy(self._t("upd_consulting"))
 
             def check_worker():
                 try:
@@ -3231,8 +3348,8 @@ class VoxCraftApp(ctk.CTk):
 
             threading.Thread(target=check_worker, daemon=True).start()
 
-        recheck_btn.configure(command=lambda: run_check(save_inputs=True))
-        run_check(save_inputs=False)
+        recheck_btn.configure(command=run_check)
+        run_check()
 
     def _relaunch_after_update(self, modal_win=None):
         self.app_config["pending_update_restore"] = True
@@ -3242,7 +3359,6 @@ class VoxCraftApp(ctk.CTk):
             _SINGLE_INSTANCE.release()
         if modal_win is not None:
             try:
-                modal_win.grab_release()
                 modal_win.destroy()
             except Exception:
                 pass
@@ -3694,8 +3810,10 @@ class VoxCraftApp(ctk.CTk):
                     cont.configure(fg_color="transparent", bg_color="transparent")
                 except Exception:
                     pass
-            for _w, fn in self._theme_hooks:
+            for wd, fn in self._theme_hooks:
                 try:
+                    if hasattr(wd, "winfo_exists") and not wd.winfo_exists():
+                        continue
                     fn(th)
                 except Exception:
                     pass
@@ -3725,7 +3843,7 @@ class VoxCraftApp(ctk.CTk):
         self._last_wave_idle = False
         self._update_hotkey_hint()
         if self._active_tab_key == "tab_eq":
-            self._draw_eq_curve()
+            self._schedule_eq_redraw()
         try:
             self.update_idletasks()
         except Exception:
@@ -3735,13 +3853,33 @@ class VoxCraftApp(ctk.CTk):
     # Guia Discord & Fechamento / Bandeja
     # ------------------------------------------------------------------ #
     def _open_discord_guide(self):
+        existing = getattr(self, "_discord_win", None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.deiconify()
+                    existing.lift()
+                    existing.focus_force()
+                    return
+            except Exception:
+                pass
+
         th = self._c()
         win = ctk.CTkToplevel(self)
+        self._discord_win = win
         win.title(self._t("discord_title"))
         win.geometry("540x400")
         win.configure(fg_color=th["modal_bg"])
         win.transient(self)
-        win.after(120, lambda: win.winfo_exists() and win.grab_set())
+
+        def _close_discord():
+            self._discord_win = None
+            try:
+                win.destroy()
+            except Exception:
+                pass
+
+        win.protocol("WM_DELETE_WINDOW", _close_discord)
 
         ctk.CTkLabel(
             win, text=self._t("discord_header"), font=self._fonts["h2_b"], text_color=th["accent"]
@@ -3760,8 +3898,10 @@ class VoxCraftApp(ctk.CTk):
             text_color=th["text_primary"],
             border_width=1,
             border_color=th["control_border"],
-            command=win.destroy,
+            command=_close_discord,
         ).pack(pady=16)
+        win.lift()
+        win.focus_force()
 
     # ------------------------------------------------------------------ #
     # Tecla de Atalho Configurável (Global mesmo em 2º plano / jogos)
@@ -4214,7 +4354,17 @@ class VoxCraftApp(ctk.CTk):
         self._quit_app()
 
     def _quit_app(self):
+        if getattr(self, "_quit_executed", False):
+            return
+        self._quit_executed = True
         self._is_quitting = True
+        self._audio_op_seq += 1
+
+        # Garante encerramento definitivo mesmo se algum driver de áudio/Win32 segurar uma thread
+        safety_timer = threading.Timer(0.75, lambda: os._exit(0))
+        safety_timer.daemon = True
+        safety_timer.start()
+
         for job_attr in ("_splash_anim_job", "_ui_loop_job", "_eq_redraw_job"):
             job = getattr(self, job_attr, None)
             if job is not None:
@@ -4223,6 +4373,7 @@ class VoxCraftApp(ctk.CTk):
                 except Exception:
                     pass
                 setattr(self, job_attr, None)
+
         if self._is_loaded:
             try:
                 self._stop_hotkey_listener()
@@ -4235,18 +4386,43 @@ class VoxCraftApp(ctk.CTk):
             router = getattr(self, "router", None)
             if router is not None:
                 try:
-                    router.stop()
+                    router.abort_start()
                 except Exception:
                     pass
-        if self._tray_icon is not None:
+                stop_t = threading.Thread(target=router.stop, daemon=True)
+                stop_t.start()
+                stop_t.join(timeout=0.45)
+
+        tray_icon = self._tray_icon
+        self._tray_icon = None
+        if tray_icon is not None:
+            tray_t = threading.Thread(target=tray_icon.stop, daemon=True)
+            tray_t.start()
+            tray_t.join(timeout=0.25)
+
+        if _SINGLE_INSTANCE is not None:
             try:
-                self._tray_icon.stop()
+                _SINGLE_INSTANCE.release()
             except Exception:
                 pass
-            self._tray_icon = None
-        if _SINGLE_INSTANCE is not None:
-            _SINGLE_INSTANCE.release()
-        self.destroy()
+
+        for attr in ("_settings_win", "_update_win", "_discord_win"):
+            sub = getattr(self, attr, None)
+            if sub is not None:
+                try:
+                    sub.destroy()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+        try:
+            self.quit()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
@@ -4263,3 +4439,4 @@ if __name__ == "__main__":
         app.mainloop()
     finally:
         _SINGLE_INSTANCE.release()
+    os._exit(0)

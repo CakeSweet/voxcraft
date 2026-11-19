@@ -87,7 +87,7 @@ Architecture: $ARCH_DEB
 Installed-Size: $INSTALLED_KB
 Depends: libportaudio2, libc6, libx11-6
 Maintainer: CakeSweet <noreply@github.com>
-Homepage: https://github.com/CakeSweet/voxcraft_studio
+Homepage: https://github.com/CakeSweet/voxcraft
 Description: Real-time desktop voice modulator and DSP studio
  VoxCraft Studio is a native real-time voice modulator with Noise Gate,
  Compressor, Pitch/Frequency Shifter, Vocoder, 5-Band EQ, Modulation,
@@ -133,7 +133,7 @@ Version:        $VERSION
 Release:        1
 Summary:        Real-time desktop voice modulator and DSP studio
 License:        MIT
-URL:            https://github.com/CakeSweet/voxcraft_studio
+URL:            https://github.com/CakeSweet/voxcraft
 Requires:       portaudio
 
 %description

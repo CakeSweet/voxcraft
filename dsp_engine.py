@@ -12,7 +12,7 @@ class DSPParams:
     output_gain_db: float = 0.0
 
     # Noise Gate & Compressor (Limpeza para Discord)
-    gate_enabled: bool = True
+    gate_enabled: bool = False
     gate_threshold_db: float = -42.0
     comp_enabled: bool = True
     comp_threshold_db: float = -18.0
@@ -205,38 +205,64 @@ def build_eq_sos(p: DSPParams, fs: float) -> np.ndarray:
 
 
 class RingDelay:
-    """Buffer circular vetorizado para Eco, Chorus/Flanger e Filtros Comb/All-pass."""
+    """Buffer circular vetorizado de baixa alocação para Eco, Chorus/Flanger e Reverb."""
 
     def __init__(self, max_samples: int):
         self.size = int(max_samples)
         self.buf = np.zeros(self.size, dtype=np.float32)
         self.write_idx = 0
+        self._scratch = np.zeros(512, dtype=np.float32)
+        self._ramp = np.arange(512, dtype=np.float64)
 
     def clear(self):
         self.buf.fill(0.0)
         self.write_idx = 0
 
+    def _get_ramp(self, length: int) -> np.ndarray:
+        if length > len(self._ramp):
+            self._ramp = np.arange(length, dtype=np.float64)
+        return self._ramp[:length]
+
     def read_chunk(self, delay_samples: int, length: int) -> np.ndarray:
         delay = max(1, min(delay_samples, self.size - 1))
         start = (self.write_idx - delay) % self.size
-        indices = (start + np.arange(length)) % self.size
-        return self.buf[indices]
+        end = start + length
+        if end <= self.size:
+            return self.buf[start:end]
+        if length > len(self._scratch):
+            self._scratch = np.empty(length, dtype=np.float32)
+        first = self.size - start
+        self._scratch[:first] = self.buf[start:]
+        self._scratch[first:length] = self.buf[:length - first]
+        return self._scratch[:length]
 
     def read_frac_chunk(self, delays: np.ndarray) -> np.ndarray:
         """Lê um chunk com atrasos fracionários por amostra (interpolação linear)."""
         length = len(delays)
         d = np.clip(delays, 1.0, float(self.size - 2))
-        read_pos = (self.write_idx + np.arange(length, dtype=np.float64) - d) % self.size
+        read_pos = (self.write_idx + self._get_ramp(length) - d) % self.size
         i0 = np.floor(read_pos).astype(np.int32)
-        i1 = (i0 + 1) % self.size
+        i1 = i0 + 1
+        i1[i1 >= self.size] = 0
         frac = (read_pos - i0).astype(np.float32)
         return self.buf[i0] * (1.0 - frac) + self.buf[i1] * frac
 
     def write_chunk(self, data: np.ndarray):
         length = len(data)
-        indices = (self.write_idx + np.arange(length)) % self.size
-        self.buf[indices] = data
-        self.write_idx = (self.write_idx + length) % self.size
+        if length >= self.size:
+            self.buf[:] = data[-self.size:]
+            self.write_idx = 0
+            return
+        end = self.write_idx + length
+        if end <= self.size:
+            self.buf[self.write_idx:end] = data
+            self.write_idx = 0 if end == self.size else end
+        else:
+            first = self.size - self.write_idx
+            self.buf[self.write_idx:] = data[:first]
+            rest = length - first
+            self.buf[:rest] = data[first:]
+            self.write_idx = rest
 
 
 class RealTimeDSPEngine:
@@ -250,8 +276,14 @@ class RealTimeDSPEngine:
         self.output_peak_db = -60.0
         self.gate_is_open = True
         self.last_waveform = np.zeros(256, dtype=np.float32)
+        self._ramp_f64 = np.arange(2048, dtype=np.float64)
 
         self._init_states()
+
+    def _get_ramp_f64(self, n: int) -> np.ndarray:
+        if n > len(self._ramp_f64):
+            self._ramp_f64 = np.arange(n, dtype=np.float64)
+        return self._ramp_f64[:n]
 
     def set_sample_rate(self, sample_rate: float):
         with self._lock:
@@ -326,12 +358,13 @@ class RealTimeDSPEngine:
         self._chorus_ring = RingDelay(int(0.12 * sr))
         self._chorus_phase = 0.0
 
-        # Phaser (até 12 estágios all-pass de 1ª ordem)
+        # Phaser (até 12 estágios all-pass em matriz SOS para 1 chamada C por chunk)
         self._phaser_phase = 0.0
-        self._phaser_zi = np.zeros((12, 1), dtype=np.float64)
+        self._phaser_sos = np.zeros((12, 6), dtype=np.float64)
+        self._phaser_sos[:, 1] = 1.0
+        self._phaser_sos[:, 3] = 1.0
+        self._phaser_zi = np.zeros((12, 2), dtype=np.float64)
         self._phaser_fb_sample = 0.0
-        self._phaser_b = np.empty(2, dtype=np.float64)
-        self._phaser_a = np.array([1.0, 0.0], dtype=np.float64)
 
         # Wahwah (biquad bandpass ressonante)
         self._wah_phase = 0.0
@@ -362,6 +395,9 @@ class RealTimeDSPEngine:
         self._comb_rings = [RingDelay(d + 2048) for d in self._comb_delays]
         self._comb_lp_state = [np.zeros(1, dtype=np.float64) for _ in self._comb_delays]
         self._ap_rings = [RingDelay(d + 2048) for d in self._ap_delays]
+        self._rev_lp_b = np.array([0.55], dtype=np.float64)
+        self._rev_lp_a = np.array([1.0, -0.45], dtype=np.float64)
+        self._rev_comb_sum = np.zeros(512, dtype=np.float32)
         self._was_bypass = bool(self.params.bypass)
 
     def _clear_effect_buffers_unlocked(self):
@@ -417,7 +453,7 @@ class RealTimeDSPEngine:
             return x
 
         with self._lock:
-            p = self.params.copy()
+            p = self.params
             if self._eq_dirty:
                 self._eq_sos = build_eq_sos(p, self.sr)
                 self._eq_dirty = False
@@ -574,14 +610,15 @@ class RealTimeDSPEngine:
         buf = np.concatenate([self._pitch_hist, x])
         m = len(self._pitch_hist)
 
-        phi1 = (self._pitch_phase + np.arange(n, dtype=np.float64) * dphi) % 1.0
+        ramp = self._get_ramp_f64(n)
+        phi1 = (self._pitch_phase + ramp * dphi) % 1.0
         phi2 = (phi1 + 0.5) % 1.0
         self._pitch_phase = float((self._pitch_phase + n * dphi) % 1.0)
 
         d1 = (1.0 - phi1) * w + 2.0
         d2 = (1.0 - phi2) * w + 2.0
 
-        idx = np.arange(n, dtype=np.float64) + m
+        idx = ramp + m
         pos1 = idx - d1
         pos2 = idx - d2
 
@@ -611,7 +648,7 @@ class RealTimeDSPEngine:
 
         # Oscilador complexo contínuo entre blocos
         dphi = 2.0 * np.pi * shift_hz / self.sr
-        phases = self._fshift_phase + np.arange(n, dtype=np.float64) * dphi
+        phases = self._fshift_phase + self._get_ramp_f64(n) * dphi
         self._fshift_phase = float((self._fshift_phase + n * dphi) % (2.0 * np.pi))
 
         out = x_del * np.cos(phases) - x_hilb * np.sin(phases)
@@ -621,7 +658,8 @@ class RealTimeDSPEngine:
         n = len(x)
         f1 = max(40.0, float(freq_hz))
         d1 = f1 / self.sr
-        p1 = (self._voc_phase1 + np.arange(n, dtype=np.float64) * d1) % 1.0
+        ramp = self._get_ramp_f64(n)
+        p1 = (self._voc_phase1 + ramp * d1) % 1.0
         self._voc_phase1 = float((self._voc_phase1 + n * d1) % 1.0)
 
         if carrier_type == "Quadrada":
@@ -629,8 +667,8 @@ class RealTimeDSPEngine:
         elif carrier_type == "Acorde":
             d2 = (f1 * 1.25) / self.sr
             d3 = (f1 * 1.50) / self.sr
-            p2 = (self._voc_phase2 + np.arange(n, dtype=np.float64) * d2) % 1.0
-            p3 = (self._voc_phase3 + np.arange(n, dtype=np.float64) * d3) % 1.0
+            p2 = (self._voc_phase2 + ramp * d2) % 1.0
+            p3 = (self._voc_phase3 + ramp * d3) % 1.0
             self._voc_phase2 = float((self._voc_phase2 + n * d2) % 1.0)
             self._voc_phase3 = float((self._voc_phase3 + n * d3) % 1.0)
             car = (0.35 * ((2.0 * p1 - 1.0) + (2.0 * p2 - 1.0) + (2.0 * p3 - 1.0))).astype(np.float32)
@@ -673,7 +711,7 @@ class RealTimeDSPEngine:
         while pos < n:
             clen = min(n - pos, min_safe)
             xc = x[pos:pos + clen]
-            phases = (self._chorus_phase + np.arange(clen, dtype=np.float64) * dphi) % 1.0
+            phases = (self._chorus_phase + self._get_ramp_f64(clen) * dphi) % 1.0
             self._chorus_phase = float((self._chorus_phase + clen * dphi) % 1.0)
 
             lfo = 0.5 * (1.0 + np.sin(2.0 * np.pi * phases))
@@ -695,14 +733,10 @@ class RealTimeDSPEngine:
         fb = float(np.clip(feedback, -0.90, 0.90))
         d = float(np.clip(depth, 0.0, 1.0))
 
-        chunk_sz = 32
+        chunk_sz = 64
         out = np.empty(n, dtype=np.float32)
         dphi = float(freq_hz) / self.sr
-
-        b_ap = self._phaser_b
-        a_ap = self._phaser_a
-        b_ap[1] = 1.0
-        a_ap[0] = 1.0
+        sos = self._phaser_sos[:n_stages]
 
         pos = 0
         while pos < n:
@@ -714,12 +748,12 @@ class RealTimeDSPEngine:
             fc = min(140.0 * (22.0 ** (lfo * d)), self.sr * 0.42)
             t = np.tan(np.pi * fc / self.sr)
             a = (1.0 - t) / (1.0 + t)
-            b_ap[0] = a
-            a_ap[1] = a
+            sos[:, 0] = a
+            sos[:, 4] = a
 
             y = xc + fb * self._phaser_fb_sample
-            for s in range(n_stages):
-                y, self._phaser_zi[s] = signal.lfilter(b_ap, a_ap, y, zi=self._phaser_zi[s])
+            y, zi_out = signal.sosfilt(sos, y, zi=self._phaser_zi[:n_stages])
+            self._phaser_zi[:n_stages] = zi_out
 
             self._phaser_fb_sample = float(np.tanh(y[-1]))
             out[pos:pos + clen] = (0.5 * xc + 0.5 * y).astype(np.float32)
@@ -731,7 +765,7 @@ class RealTimeDSPEngine:
         n = len(x)
         d = float(np.clip(depth, 0.0, 1.0))
         q = float(np.clip(resonance, 0.5, 8.0))
-        chunk_sz = 32
+        chunk_sz = 64
         out = np.empty(n, dtype=np.float32)
         dphi = float(freq_hz) / self.sr
         b_wah = self._wah_b
@@ -765,7 +799,7 @@ class RealTimeDSPEngine:
     def _process_tremolo(self, x: np.ndarray, freq_hz: float, waveform: str, depth: float) -> np.ndarray:
         n = len(x)
         dphi = float(freq_hz) / self.sr
-        phases = (self._trem_phase + np.arange(n, dtype=np.float64) * dphi) % 1.0
+        phases = (self._trem_phase + self._get_ramp_f64(n) * dphi) % 1.0
         self._trem_phase = float((self._trem_phase + n * dphi) % 1.0)
 
         if waveform == "Quadrada":
@@ -784,7 +818,7 @@ class RealTimeDSPEngine:
     def _process_ring_mod(self, x: np.ndarray, freq_hz: float, waveform: str) -> np.ndarray:
         n = len(x)
         dphi = freq_hz / self.sr
-        phases = (self._ring_phase + np.arange(n, dtype=np.float64) * dphi) % 1.0
+        phases = (self._ring_phase + self._get_ramp_f64(n) * dphi) % 1.0
         self._ring_phase = float((self._ring_phase + n * dphi) % 1.0)
 
         if waveform == "Quadrada":
@@ -794,7 +828,7 @@ class RealTimeDSPEngine:
         else:
             mod = np.sin(2.0 * np.pi * phases)
 
-        return (x * mod.astype(np.float32))
+        return x * mod.astype(np.float32)
 
     def _process_distortion(self, x: np.ndarray, drive: float, bits: int, downsample: int) -> np.ndarray:
         drive = max(1.0, float(drive))
@@ -831,8 +865,7 @@ class RealTimeDSPEngine:
             filt_del, self._echo_lp_zi = signal.lfilter(
                 self._echo_lp_b, self._echo_lp_a, delayed, zi=self._echo_lp_zi
             )
-            filt_del = filt_del.astype(np.float32)
-            self._echo_ring.write_chunk(xc + fb * filt_del)
+            self._echo_ring.write_chunk(xc + fb * filt_del.astype(np.float32))
             out[pos:pos + chunk_len] = xc + mix * delayed
             pos += chunk_len
 
@@ -845,22 +878,27 @@ class RealTimeDSPEngine:
         max_chunk = min(self._ap_delays)
         wet_out = np.empty(n, dtype=np.float32)
 
-        lp_b = np.array([1.0 - d], dtype=np.float64)
-        lp_a = np.array([1.0, -d], dtype=np.float64)
+        self._rev_lp_b[0] = 1.0 - d
+        self._rev_lp_a[1] = -d
+        lp_b = self._rev_lp_b
+        lp_a = self._rev_lp_a
+        if max_chunk > len(self._rev_comb_sum):
+            self._rev_comb_sum = np.zeros(max_chunk, dtype=np.float32)
 
         pos = 0
         while pos < n:
             clen = min(n - pos, max_chunk)
             xc = x[pos:pos + clen] * 0.25
 
-            comb_sum = np.zeros(clen, dtype=np.float32)
+            comb_sum = self._rev_comb_sum[:clen]
+            comb_sum.fill(0.0)
             for idx, (ring, delay) in enumerate(zip(self._comb_rings, self._comb_delays)):
                 del_sig = ring.read_chunk(delay, clen)
+                comb_sum += del_sig
                 damped, self._comb_lp_state[idx] = signal.lfilter(
                     lp_b, lp_a, del_sig, zi=self._comb_lp_state[idx]
                 )
                 ring.write_chunk(xc + fb * damped.astype(np.float32))
-                comb_sum += del_sig
 
             y_ap = comb_sum
             ap_g = 0.5

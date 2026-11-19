@@ -25,8 +25,8 @@ APP_CONFIG_FILE = os.path.join(get_user_data_dir(), "voxcraft_config.json")
 
 def get_builtin_presets() -> dict[str, DSPParams]:
     return {
-        "Normal (Limpo + Gate)": DSPParams(
-            gate_enabled=True,
+        "Normal": DSPParams(
+            gate_enabled=False,
             gate_threshold_db=-44.0,
             comp_enabled=True,
             eq_enabled=True,
@@ -36,7 +36,7 @@ def get_builtin_presets() -> dict[str, DSPParams]:
             eq_band5_db=2.0,
         ),
         "Locutor / Podcast (Estúdio)": DSPParams(
-            gate_enabled=True,
+            gate_enabled=False,
             gate_threshold_db=-46.0,
             comp_enabled=True,
             comp_threshold_db=-20.0,
