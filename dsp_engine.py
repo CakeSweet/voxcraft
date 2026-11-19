@@ -212,6 +212,10 @@ class RingDelay:
         self.buf = np.zeros(self.size, dtype=np.float32)
         self.write_idx = 0
 
+    def clear(self):
+        self.buf.fill(0.0)
+        self.write_idx = 0
+
     def read_chunk(self, delay_samples: int, length: int) -> np.ndarray:
         delay = max(1, min(delay_samples, self.size - 1))
         start = (self.write_idx - delay) % self.size
@@ -257,8 +261,16 @@ class RealTimeDSPEngine:
 
     def update_params(self, new_params: DSPParams):
         with self._lock:
+            prev_bypass = bool(self.params.bypass)
             self.params = new_params.copy()
             self._eq_dirty = True
+            if bool(self.params.bypass) != prev_bypass:
+                self._clear_effect_buffers_unlocked()
+                self._was_bypass = bool(self.params.bypass)
+
+    def clear_effect_buffers(self):
+        with self._lock:
+            self._clear_effect_buffers_unlocked()
 
     def _init_states(self):
         sr = self.sr
@@ -350,6 +362,43 @@ class RealTimeDSPEngine:
         self._comb_rings = [RingDelay(d + 2048) for d in self._comb_delays]
         self._comb_lp_state = [np.zeros(1, dtype=np.float64) for _ in self._comb_delays]
         self._ap_rings = [RingDelay(d + 2048) for d in self._ap_delays]
+        self._was_bypass = bool(self.params.bypass)
+
+    def _clear_effect_buffers_unlocked(self):
+        self._pitch_hist.fill(0.0)
+        self._pitch_phase = 0.0
+        self._hilb_zi.fill(0.0)
+        self._hilb_delay_buf.fill(0.0)
+        self._fshift_phase = 0.0
+        for arr in self._voc_mod_zi:
+            arr.fill(0.0)
+        for arr in self._voc_car_zi:
+            arr.fill(0.0)
+        for arr in self._voc_env_zi:
+            arr.fill(0.0)
+        self._voc_phase1 = 0.0
+        self._voc_phase2 = 0.0
+        self._voc_phase3 = 0.0
+        self._eq_zi.fill(0.0)
+        self._chorus_ring.clear()
+        self._chorus_phase = 0.0
+        self._phaser_phase = 0.0
+        self._phaser_zi.fill(0.0)
+        self._phaser_fb_sample = 0.0
+        self._wah_phase = 0.0
+        self._wah_zi.fill(0.0)
+        self._trem_phase = 0.0
+        self._ring_phase = 0.0
+        self._bc_counter = 0
+        self._bc_hold = 0.0
+        self._echo_ring.clear()
+        self._echo_lp_zi.fill(0.0)
+        for ring in self._comb_rings:
+            ring.clear()
+        for st in self._comb_lp_state:
+            st.fill(0.0)
+        for ring in self._ap_rings:
+            ring.clear()
 
     @staticmethod
     def _onepole_lp(fc: float, fs: float):
@@ -378,10 +427,19 @@ class RealTimeDSPEngine:
         self.input_peak_db = 0.65 * self.input_peak_db + 0.35 * in_db
 
         if p.bypass:
+            if not self._was_bypass:
+                with self._lock:
+                    self._clear_effect_buffers_unlocked()
+                    self._was_bypass = True
             self.output_peak_db = self.input_peak_db
             self.gate_is_open = True
             self._update_waveform(x)
             return x
+
+        if self._was_bypass:
+            with self._lock:
+                self._clear_effect_buffers_unlocked()
+                self._was_bypass = False
 
         # 1. Ganho de Entrada
         if abs(p.input_gain_db) > 0.05:

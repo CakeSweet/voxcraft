@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import ssl
 import subprocess
 import sys
@@ -19,6 +20,15 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+
+if sys.platform == "win32":
+    import winreg
+else:
+    winreg = None
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
 
 import customtkinter as ctk
 
@@ -42,15 +52,169 @@ ICON_PNG_PATH = os.path.join(ASSETS_DIR, "voxcraft.png")
 BUILD_INFO_PATH = os.path.join(ASSETS_DIR, "build_info.json")
 
 
-def _peek_startup_prefs() -> tuple[str, str]:
-    candidates = []
+def _get_app_data_dir(create: bool = True) -> str:
     if not IS_FROZEN and os.access(BASE_DIR, os.W_OK):
-        candidates.append(os.path.join(BASE_DIR, "voxcraft_config.json"))
+        return BASE_DIR
     if sys.platform == "win32":
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
     else:
         base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    candidates.append(os.path.join(base, "VoxCraftStudio", "voxcraft_config.json"))
+    data_dir = os.path.join(base, "VoxCraftStudio")
+    if create:
+        os.makedirs(data_dir, exist_ok=True)
+    return data_dir
+
+
+def _get_instance_dir() -> str:
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    inst_dir = os.path.join(base, "VoxCraftStudio")
+    os.makedirs(inst_dir, exist_ok=True)
+    return inst_dir
+
+
+class _VoxCraftSingleInstance:
+    """Garante instância única e restaura a janela já aberta quando iniciado novamente."""
+
+    def __init__(self):
+        self._inst_dir = _get_instance_dir()
+        self._lock_path = os.path.join(self._inst_dir, "voxcraft.lock")
+        self._ipc_path = os.path.join(self._inst_dir, "voxcraft.ipc")
+        self._lock_fp = None
+        self._win_mutex = None
+        self._server_sock: socket.socket | None = None
+        self._stop_event = threading.Event()
+        self._on_show = None
+
+    def acquire(self, wait_timeout: float = 0.0) -> bool:
+        deadline = time.monotonic() + max(0.0, wait_timeout)
+        while True:
+            if sys.platform == "win32":
+                try:
+                    k32 = ctypes.windll.kernel32
+                    handle = k32.CreateMutexW(None, True, "Local\\VoxCraftStudio_SingleInstance_V1")
+                    last_err = k32.GetLastError()
+                    if handle and last_err != 183:  # ERROR_ALREADY_EXISTS
+                        self._win_mutex = handle
+                        return True
+                    if handle:
+                        k32.CloseHandle(handle)
+                except Exception:
+                    pass
+            else:
+                try:
+                    fp = open(self._lock_path, "w", encoding="utf-8")
+                    if fcntl is not None:
+                        fcntl.flock(fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    fp.write(str(os.getpid()))
+                    fp.flush()
+                    self._lock_fp = fp
+                    return True
+                except Exception:
+                    try:
+                        fp.close()
+                    except Exception:
+                        pass
+
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.1)
+
+    def start_ipc_server(self, on_show_callback):
+        self._on_show = on_show_callback
+        try:
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind(("127.0.0.1", 0))
+            srv.listen(4)
+            srv.settimeout(0.4)
+            port = srv.getsockname()[1]
+            self._server_sock = srv
+            with open(self._ipc_path, "w", encoding="utf-8") as f:
+                f.write(str(port))
+        except Exception:
+            return
+
+        def _serve():
+            while not self._stop_event.is_set():
+                try:
+                    conn, _ = srv.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+                try:
+                    data = conn.recv(64)
+                    if b"SHOW" in data and self._on_show is not None:
+                        self._on_show()
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=_serve, daemon=True).start()
+
+    def notify_existing(self, retries: int = 8) -> bool:
+        for _ in range(retries):
+            try:
+                if os.path.exists(self._ipc_path):
+                    with open(self._ipc_path, "r", encoding="utf-8") as f:
+                        port = int(f.read().strip())
+                    with socket.create_connection(("127.0.0.1", port), timeout=1.0) as cli:
+                        cli.sendall(b"SHOW\n")
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.08)
+        return False
+
+    def release(self):
+        self._stop_event.set()
+        if self._server_sock is not None:
+            try:
+                self._server_sock.close()
+            except Exception:
+                pass
+            self._server_sock = None
+        try:
+            if os.path.exists(self._ipc_path):
+                os.remove(self._ipc_path)
+        except Exception:
+            pass
+        if self._win_mutex is not None and sys.platform == "win32":
+            try:
+                k32 = ctypes.windll.kernel32
+                k32.ReleaseMutex(self._win_mutex)
+                k32.CloseHandle(self._win_mutex)
+            except Exception:
+                pass
+            self._win_mutex = None
+        if self._lock_fp is not None:
+            try:
+                if fcntl is not None:
+                    fcntl.flock(self._lock_fp.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                self._lock_fp.close()
+            except Exception:
+                pass
+            self._lock_fp = None
+
+
+_SINGLE_INSTANCE: _VoxCraftSingleInstance | None = None
+
+
+def _peek_startup_prefs() -> tuple[str, str]:
+    candidates = []
+    if not IS_FROZEN and os.access(BASE_DIR, os.W_OK):
+        candidates.append(os.path.join(BASE_DIR, "voxcraft_config.json"))
+    candidates.append(os.path.join(_get_instance_dir(), "voxcraft_config.json"))
 
     theme_key, lang_key = "dark", "pt"
     for path in candidates:
@@ -196,6 +360,7 @@ class VoxCraftApp(ctk.CTk):
         self.ui_lang: str = _INIT_LANG
         self._i18n_hooks: list = []
         self._theme_hooks: list = []
+        self._transparent_containers: list = []
         self._tab_frames: dict[str, ctk.CTkFrame] = {}
         self._tab_buttons: dict[str, ctk.CTkButton] = {}
         self._active_tab_key: str = "tab_pitch"
@@ -275,16 +440,26 @@ class VoxCraftApp(ctk.CTk):
         th = self._c()
         if role == "panel":
             w = ctk.CTkFrame(parent, fg_color=th["panel_bg"], border_width=1, border_color=th["panel_border"], **kw)
-            self._reg_theme(w, lambda t, wd=w: wd.configure(fg_color=t["panel_bg"], border_color=t["panel_border"]))
+            self._reg_theme(
+                w,
+                lambda t, wd=w: wd.configure(
+                    fg_color=t["panel_bg"], border_color=t["panel_border"], bg_color="transparent"
+                ),
+            )
         elif role == "subcard":
             w = ctk.CTkFrame(parent, fg_color=th["subcard_bg"], **kw)
-            self._reg_theme(w, lambda t, wd=w: wd.configure(fg_color=t["subcard_bg"]))
+            self._reg_theme(w, lambda t, wd=w: wd.configure(fg_color=t["subcard_bg"], bg_color="transparent"))
         elif role == "tabbar":
             w = ctk.CTkFrame(parent, fg_color=th["tab_bg"], **kw)
-            self._reg_theme(w, lambda t, wd=w: wd.configure(fg_color=t["tab_bg"]))
+            self._reg_theme(w, lambda t, wd=w: wd.configure(fg_color=t["tab_bg"], bg_color="transparent"))
         else:
             w = ctk.CTkFrame(parent, fg_color=th["card_bg"], border_width=1, border_color=th["card_border"], **kw)
-            self._reg_theme(w, lambda t, wd=w: wd.configure(fg_color=t["card_bg"], border_color=t["card_border"]))
+            self._reg_theme(
+                w,
+                lambda t, wd=w: wd.configure(
+                    fg_color=t["card_bg"], border_color=t["card_border"], bg_color="transparent"
+                ),
+            )
         return w
 
     def _scroll(self, parent, role: str = "transparent", **kw) -> ctk.CTkScrollableFrame:
@@ -300,16 +475,27 @@ class VoxCraftApp(ctk.CTk):
                 scrollbar_button_hover_color=th["control_hover"],
                 **kw,
             )
-            self._reg_theme(
-                w,
-                lambda t, wd=w: wd.configure(
+
+            def _apply_panel_scroll_theme(t, wd=w):
+                wd.configure(
                     fg_color=t["panel_bg"],
                     border_color=t["panel_border"],
+                    bg_color="transparent",
                     scrollbar_fg_color=t["panel_bg"],
                     scrollbar_button_color=t["control_btn"],
                     scrollbar_button_hover_color=t["control_hover"],
-                ),
-            )
+                )
+                try:
+                    if hasattr(wd, "_parent_frame"):
+                        wd._parent_frame.configure(
+                            fg_color=t["panel_bg"], border_color=t["panel_border"], bg_color="transparent"
+                        )
+                    if hasattr(wd, "_parent_canvas"):
+                        wd._parent_canvas.configure(bg=t["panel_bg"])
+                except Exception:
+                    pass
+
+            self._reg_theme(w, _apply_panel_scroll_theme)
         else:
             w = ctk.CTkScrollableFrame(
                 parent,
@@ -319,14 +505,24 @@ class VoxCraftApp(ctk.CTk):
                 scrollbar_button_hover_color=th["control_hover"],
                 **kw,
             )
-            self._reg_theme(
-                w,
-                lambda t, wd=w: wd.configure(
+
+            def _apply_trans_scroll_theme(t, wd=w):
+                wd.configure(
+                    fg_color="transparent",
+                    bg_color="transparent",
                     scrollbar_fg_color=t["panel_bg"],
                     scrollbar_button_color=t["control_btn"],
                     scrollbar_button_hover_color=t["control_hover"],
-                ),
-            )
+                )
+                try:
+                    if hasattr(wd, "_parent_frame"):
+                        wd._parent_frame.configure(fg_color=t["panel_bg"], bg_color="transparent")
+                    if hasattr(wd, "_parent_canvas"):
+                        wd._parent_canvas.configure(bg=t["panel_bg"])
+                except Exception:
+                    pass
+
+            self._reg_theme(w, _apply_trans_scroll_theme)
         return w
 
     def _lbl(self, parent, key_or_text: str, font_key: str = "sm", color_role: str = "text_muted", is_key: bool = True, **kw) -> ctk.CTkLabel:
@@ -495,20 +691,29 @@ class VoxCraftApp(ctk.CTk):
 
     def _build_splash_ui(self):
         th = self._c()
+        local_id = self._get_local_build_identity()
+        self.configure(fg_color=th["panel_bg"])
         self._splash_frame = ctk.CTkFrame(
-            self, fg_color=th["panel_bg"], border_width=1, border_color=th["panel_border"], corner_radius=14
+            self, fg_color=th["panel_bg"], border_width=0, corner_radius=0
         )
-        self._splash_frame.pack(fill="both", expand=True, padx=14, pady=14)
+        self._splash_frame.pack(fill="both", expand=True, padx=0, pady=0)
+
+        top_strip = ctk.CTkFrame(
+            self._splash_frame, fg_color=th["accent"], height=3, corner_radius=0, border_width=0
+        )
+        top_strip.pack(fill="x", side="top")
 
         hdr = ctk.CTkFrame(self._splash_frame, fg_color="transparent")
-        hdr.pack(pady=(26, 8))
+        hdr.pack(pady=(34, 8))
 
         if os.path.exists(ICON_PNG_PATH):
             try:
                 raw_ico = tk.PhotoImage(file=ICON_PNG_PATH)
                 factor = max(1, raw_ico.width() // 52)
                 self._splash_icon_photo = raw_ico.subsample(factor, factor)
-                tk.Label(hdr, image=self._splash_icon_photo, bg=th["panel_bg"]).pack(side="left", padx=(0, 12))
+                tk.Label(hdr, image=self._splash_icon_photo, bg=th["panel_bg"], bd=0, highlightthickness=0).pack(
+                    side="left", padx=(0, 12)
+                )
             except Exception:
                 pass
 
@@ -519,7 +724,7 @@ class VoxCraftApp(ctk.CTk):
         ).pack(anchor="w")
         ctk.CTkLabel(
             titles,
-            text=f"v{APP_VERSION}",
+            text=f"v{local_id['version']}",
             font=self._fonts["xs"],
             text_color=th["text_subtle"],
         ).pack(anchor="w")
@@ -833,6 +1038,7 @@ class VoxCraftApp(ctk.CTk):
         th = self._c()
         self._i18n_hooks = []
         self._theme_hooks = []
+        self._transparent_containers = [root]
         self._tab_frames = {}
         self._tab_buttons = {}
         self._active_tab_key = "tab_pitch"
@@ -946,6 +1152,7 @@ class VoxCraftApp(ctk.CTk):
         # Corpo Principal: Sidebar (Esquerda) + Workbench (Direita)
         body = ctk.CTkFrame(root, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+        self._transparent_containers.append(body)
 
         self._build_sidebar(body)
         self._build_workbench(body)
@@ -1156,6 +1363,7 @@ class VoxCraftApp(ctk.CTk):
 
         self._tab_content = ctk.CTkFrame(shell, fg_color="transparent")
         self._tab_content.pack(fill="both", expand=True, padx=4, pady=(0, 6))
+        self._transparent_containers.append(self._tab_content)
 
         specs = [
             ("tab_pitch", self._build_pitch_tab),
@@ -1184,6 +1392,7 @@ class VoxCraftApp(ctk.CTk):
 
             frame = ctk.CTkFrame(self._tab_content, fg_color="transparent")
             self._tab_frames[tk_key] = frame
+            self._transparent_containers.append(frame)
             builder(frame)
 
         self._tab_frames[self._active_tab_key].pack(fill="both", expand=True)
@@ -2293,6 +2502,39 @@ class VoxCraftApp(ctk.CTk):
             pass
         return {}
 
+    @staticmethod
+    def _parse_version_tuple(raw: str) -> tuple[int, ...]:
+        if not raw:
+            return ()
+        m = re.search(r"(\d+(?:\.\d+)+)", str(raw).strip())
+        if not m:
+            return ()
+        try:
+            return tuple(int(part) for part in m.group(1).split("."))
+        except Exception:
+            return ()
+
+    def _get_local_build_identity(self) -> dict[str, str]:
+        binfo = self._read_build_info()
+        cfg = getattr(self, "app_config", None) or {}
+        ver_raw = ""
+        for cand in (
+            binfo.get("version"),
+            binfo.get("tag"),
+            cfg.get("installed_version"),
+            cfg.get("installed_tag"),
+            APP_VERSION,
+        ):
+            vt = self._parse_version_tuple(str(cand or ""))
+            if vt:
+                ver_raw = ".".join(str(x) for x in vt)
+                break
+        if not ver_raw:
+            ver_raw = APP_VERSION
+        tag = str(binfo.get("tag") or cfg.get("installed_tag") or f"v{ver_raw}").strip()
+        commit = str(binfo.get("commit") or cfg.get("installed_commit_sha") or "").strip()
+        return {"version": ver_raw, "tag": tag, "commit": commit}
+
     def _detect_github_repo(self) -> str:
         saved = str((self.app_config or {}).get("github_repo", "")).strip()
         if saved and "/" in saved:
@@ -2399,13 +2641,15 @@ class VoxCraftApp(ctk.CTk):
         win.transient(self)
         win.configure(fg_color=th["modal_bg"])
 
+        local_id = self._get_local_build_identity()
+
         hdr_row = ctk.CTkFrame(win, fg_color="transparent")
         hdr_row.pack(fill="x", padx=20, pady=(16, 4))
         ctk.CTkLabel(
             hdr_row, text=self._t("upd_header"), font=self._fonts["h2_b"], text_color=th["accent"]
         ).pack(side="left")
         ctk.CTkLabel(
-            hdr_row, text=f"v{APP_VERSION}", font=self._fonts["xs_b"], text_color=th["text_subtle"]
+            hdr_row, text=f"v{local_id['version']}", font=self._fonts["xs_b"], text_color=th["text_subtle"]
         ).pack(side="right")
 
         msg_lbl = ctk.CTkLabel(
@@ -2582,10 +2826,17 @@ class VoxCraftApp(ctk.CTk):
                 self._run_cmd([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"], BASE_DIR)
             safe_ui(lambda: self._relaunch_after_update(win))
 
-        def _launch_exe_installer(exe_path: str):
+        def _launch_exe_installer(exe_path: str, release_meta: dict | None = None):
             self.app_config["pending_update_restore"] = True
             self.app_config["was_running_before_update"] = bool(self.router.running)
+            if isinstance(release_meta, dict):
+                if release_meta.get("tag"):
+                    self.app_config["installed_tag"] = str(release_meta["tag"])
+                if release_meta.get("version"):
+                    self.app_config["installed_version"] = str(release_meta["version"])
             self._save_config(include_params=True)
+            if _SINGLE_INSTANCE is not None:
+                _SINGLE_INSTANCE.release()
             try:
                 win.grab_release()
                 win.destroy()
@@ -2602,7 +2853,7 @@ class VoxCraftApp(ctk.CTk):
                             "chcp 65001 >nul\r\n"
                             "ping -n 3 127.0.0.1 >nul\r\n"
                             f'"{exe_path}" /SILENT /NORESTART /CLOSEAPPLICATIONS\r\n'
-                            f'if exist "{app_exe}" start "" "{app_exe}"\r\n'
+                            f'if exist "{app_exe}" start "" "{app_exe}" --relaunch\r\n'
                             'del "%~f0"\r\n'
                         )
                     else:
@@ -2611,7 +2862,7 @@ class VoxCraftApp(ctk.CTk):
                             "chcp 65001 >nul\r\n"
                             "ping -n 3 127.0.0.1 >nul\r\n"
                             f'copy /y "{exe_path}" "{app_exe}" >nul\r\n'
-                            f'start "" "{app_exe}"\r\n'
+                            f'start "" "{app_exe}" --relaunch\r\n'
                             'del "%~f0"\r\n'
                         )
                     with open(bat_path, "w", encoding="utf-8") as bf:
@@ -2698,7 +2949,7 @@ class VoxCraftApp(ctk.CTk):
         def apply_git_update(target_ref: str, force_reset: bool = False):
             threading.Thread(target=lambda: _run_git_update(target_ref, force_reset), daemon=True).start()
 
-        def _run_github_zip_update(repo_slug: str, tok: str = ""):
+        def _run_github_zip_update(repo_slug: str, tok: str = "", commit_sha: str = ""):
             _set_busy(self._t("upd_downloading_gh", repo=repo_slug))
             raw_zip = None
             last_err = ""
@@ -2718,12 +2969,21 @@ class VoxCraftApp(ctk.CTk):
                 return
             try:
                 self._extract_zip_preserving_config(io.BytesIO(raw_zip))
+                if commit_sha:
+                    self.app_config["installed_commit_sha"] = commit_sha
+                    self._save_config()
             except Exception as e:
                 finish_message(self._t("upd_extract_fail", err=e), "#ef4444")
                 return
             install_deps_and_relaunch()
 
-        def _download_and_launch_exe(download_url: str, asset_name: str, api_asset_url: str = "", tok: str = ""):
+        def _download_and_launch_exe(
+            download_url: str,
+            asset_name: str,
+            api_asset_url: str = "",
+            tok: str = "",
+            release_meta: dict | None = None,
+        ):
             _set_busy(self._t("upd_downloading_rel", name=asset_name))
             try:
                 if tok and api_asset_url:
@@ -2742,7 +3002,7 @@ class VoxCraftApp(ctk.CTk):
                 finish_message(self._t("upd_dl_exe_fail", err=e), "#ef4444")
                 return
 
-            safe_ui(lambda p=out_path: _launch_exe_installer(p))
+            safe_ui(lambda p=out_path, m=release_meta: _launch_exe_installer(p, m))
 
         def run_check(save_inputs: bool = False):
             if save_inputs:
@@ -2755,6 +3015,10 @@ class VoxCraftApp(ctk.CTk):
 
             def check_worker():
                 try:
+                    cur_local = self._get_local_build_identity()
+                    local_ver = self._parse_version_tuple(cur_local["version"])
+                    local_commit = cur_local["commit"]
+
                     if IS_FROZEN:
                         rel = None
                         last_err = None
@@ -2774,7 +3038,11 @@ class VoxCraftApp(ctk.CTk):
                                         saw_empty_releases = True
                                     non_draft = [r for r in parsed if not r.get("draft")]
                                     rel = next(
-                                        (r for r in non_draft if any(str(a.get("name", "")).lower().endswith(".exe") for a in (r.get("assets") or []))),
+                                        (
+                                            r
+                                            for r in non_draft
+                                            if any(str(a.get("name", "")).lower().endswith(".exe") for a in (r.get("assets") or []))
+                                        ),
                                         non_draft[0] if non_draft else None,
                                     )
                                 elif isinstance(parsed, dict) and parsed.get("id"):
@@ -2788,7 +3056,31 @@ class VoxCraftApp(ctk.CTk):
                             direct_url = f"https://github.com/{repo_slug}/releases/latest/download/VoxCraftStudio_Setup.exe"
                             try:
                                 _, final_url = self._download_bytes(direct_url, timeout=12, method="HEAD")
-                                _download_and_launch_exe(final_url, "VoxCraftStudio_Setup.exe")
+                                m_tag = re.search(r"/releases/download/([^/]+)/", final_url)
+                                redir_tag = m_tag.group(1) if m_tag else "latest"
+                                redir_ver = self._parse_version_tuple(redir_tag)
+                                if redir_ver and local_ver and redir_ver > local_ver:
+                                    rel_meta = {
+                                        "tag": redir_tag,
+                                        "version": ".".join(str(x) for x in redir_ver),
+                                    }
+                                    _download_and_launch_exe(final_url, "VoxCraftStudio_Setup.exe", release_meta=rel_meta)
+                                    return
+                                msg_up = (
+                                    f"{self._t('upd_up_to_date_ver', ver=cur_local['version'])}\n"
+                                    f"{self._t('upd_no_newer_note', local_ver=cur_local['version'], remote_tag=redir_tag)}"
+                                )
+                                finish_message(
+                                    msg_up,
+                                    "#10b981",
+                                    enable_action=True,
+                                    btn_text=self._t("upd_force_reinstall"),
+                                    cmd=lambda u=final_url: threading.Thread(
+                                        target=_download_and_launch_exe,
+                                        args=(u, "VoxCraftStudio_Setup.exe"),
+                                        daemon=True,
+                                    ).start(),
+                                )
                                 return
                             except Exception:
                                 pass
@@ -2818,14 +3110,59 @@ class VoxCraftApp(ctk.CTk):
                             return
 
                         assets = rel.get("assets") or []
-                        chosen = next((a for a in assets if a.get("name") == "VoxCraftStudio_Setup.exe"), None)
+                        chosen = next(
+                            (
+                                a
+                                for a in assets
+                                if str(a.get("name", "")).lower().endswith(".exe")
+                                and "setup" in str(a.get("name", "")).lower()
+                            ),
+                            None,
+                        )
                         if chosen is None:
                             chosen = next((a for a in assets if str(a.get("name", "")).lower().endswith(".exe")), None)
+
+                        remote_tag = str(rel.get("tag_name") or "").strip()
+                        remote_ver = (
+                            self._parse_version_tuple(remote_tag)
+                            or self._parse_version_tuple(str(chosen.get("name", "") if chosen else ""))
+                            or self._parse_version_tuple(str(rel.get("name", "")))
+                        )
+                        remote_ver_str = ".".join(str(x) for x in remote_ver) if remote_ver else ""
+                        is_newer = bool(remote_ver and local_ver and remote_ver > local_ver)
+
+                        if not is_newer:
+                            shown_tag = remote_tag or "latest"
+                            msg_up = (
+                                f"{self._t('upd_up_to_date_ver', ver=cur_local['version'])}\n"
+                                f"{self._t('upd_no_newer_note', local_ver=cur_local['version'], remote_tag=shown_tag)}"
+                            )
+                            if chosen and (chosen.get("browser_download_url") or chosen.get("url")):
+                                asset_name = chosen["name"]
+                                dl_url = chosen.get("browser_download_url", "")
+                                api_asset_url = chosen.get("url", "")
+                                rel_meta = {"tag": remote_tag, "version": remote_ver_str}
+                                finish_message(
+                                    msg_up,
+                                    "#10b981",
+                                    enable_action=True,
+                                    btn_text=self._t("upd_force_reinstall"),
+                                    cmd=lambda d=dl_url, n=asset_name, au=api_asset_url, tk_=token, rm=rel_meta: threading.Thread(
+                                        target=_download_and_launch_exe,
+                                        args=(d, n, au, tk_, rm),
+                                        daemon=True,
+                                    ).start(),
+                                )
+                            else:
+                                finish_message(msg_up, "#10b981")
+                            return
+
                         if chosen and (chosen.get("browser_download_url") or chosen.get("url")):
                             asset_name = chosen["name"]
                             dl_url = chosen.get("browser_download_url", "")
                             api_asset_url = chosen.get("url", "")
-                            _download_and_launch_exe(dl_url, asset_name, api_asset_url, token)
+                            rel_meta = {"tag": remote_tag, "version": remote_ver_str}
+                            _download_and_launch_exe(dl_url, asset_name, api_asset_url, token, rel_meta)
                             return
 
                         finish_message(self._t("upd_no_exe_rel", repo=repo_slug), "#f59e0b")
@@ -2859,7 +3196,36 @@ class VoxCraftApp(ctk.CTk):
                             _run_git_update(target, force_reset=False)
                             return
 
-                    _run_github_zip_update(repo_slug, token)
+                    # Instalação via código-fonte sem .git: verifica SHA remoto antes de baixar/reiniciar
+                    remote_head_sha = ""
+                    try:
+                        raw_head, _ = self._download_bytes(
+                            f"https://api.github.com/repos/{repo_slug}/commits/HEAD",
+                            timeout=12,
+                            token=token,
+                            accept="application/vnd.github+json",
+                        )
+                        parsed_head = json.loads(raw_head.decode("utf-8"))
+                        if isinstance(parsed_head, dict):
+                            remote_head_sha = str(parsed_head.get("sha") or "").strip()
+                    except Exception:
+                        remote_head_sha = ""
+
+                    if remote_head_sha and local_commit and remote_head_sha == local_commit:
+                        finish_message(
+                            self._t("upd_src_up_to_date"),
+                            "#10b981",
+                            enable_action=True,
+                            btn_text=self._t("upd_force_reinstall"),
+                            cmd=lambda rs=repo_slug, tk_=token, sha=remote_head_sha: threading.Thread(
+                                target=_run_github_zip_update,
+                                args=(rs, tk_, sha),
+                                daemon=True,
+                            ).start(),
+                        )
+                        return
+
+                    _run_github_zip_update(repo_slug, token, remote_head_sha)
                 except Exception as exc:
                     finish_message(self._t("upd_check_err", err=exc), "#ef4444")
 
@@ -2872,6 +3238,8 @@ class VoxCraftApp(ctk.CTk):
         self.app_config["pending_update_restore"] = True
         self.app_config["was_running_before_update"] = bool(self.router.running)
         self._save_config(include_params=True)
+        if _SINGLE_INSTANCE is not None:
+            _SINGLE_INSTANCE.release()
         if modal_win is not None:
             try:
                 modal_win.grab_release()
@@ -2879,15 +3247,109 @@ class VoxCraftApp(ctk.CTk):
             except Exception:
                 pass
         try:
-            cmd = [sys.executable] if IS_FROZEN else [sys.executable, os.path.abspath(__file__)]
+            cmd = [sys.executable, "--relaunch"] if IS_FROZEN else [sys.executable, os.path.abspath(__file__), "--relaunch"]
             subprocess.Popen(cmd, cwd=BASE_DIR)
         except Exception as e:
             messagebox.showerror(self._t("upd_done_title"), self._t("upd_done_body", err=e))
         self._quit_app()
 
     # ------------------------------------------------------------------ #
-    # Configurações (Tema e Idioma)
+    # Configurações (Tema, Idioma e Inicialização com o Sistema)
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _get_autostart_command() -> str:
+        if IS_FROZEN:
+            return f'"{os.path.abspath(sys.executable)}"'
+        script_path = os.path.abspath(__file__)
+        if sys.platform == "win32":
+            py_dir = os.path.dirname(os.path.abspath(sys.executable))
+            pyw = os.path.join(py_dir, "pythonw.exe")
+            interp = pyw if os.path.exists(pyw) else sys.executable
+            return f'"{interp}" "{script_path}"'
+        return f'"{sys.executable}" "{script_path}"'
+
+    @staticmethod
+    def _get_linux_desktop_autostart_path() -> str:
+        cfg_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+        return os.path.join(cfg_home, "autostart", "voxcraft-studio.desktop")
+
+    def _is_autostart_enabled(self) -> bool:
+        if sys.platform == "win32" and winreg is not None:
+            try:
+                with winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Software\Microsoft\Windows\CurrentVersion\Run",
+                    0,
+                    winreg.KEY_READ,
+                ) as key:
+                    val, _ = winreg.QueryValueEx(key, "VoxCraftStudio")
+                    return bool(str(val).strip())
+            except FileNotFoundError:
+                return False
+            except Exception:
+                return bool((self.app_config or {}).get("autostart_enabled", False))
+        desktop_path = self._get_linux_desktop_autostart_path()
+        if os.path.exists(desktop_path):
+            try:
+                with open(desktop_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                if "X-GNOME-Autostart-enabled=false" in content or "Hidden=true" in content:
+                    return False
+                return True
+            except Exception:
+                return True
+        return False
+
+    def _set_autostart_enabled(self, enabled: bool) -> tuple[bool, str]:
+        if sys.platform == "win32" and winreg is not None:
+            try:
+                with winreg.CreateKeyEx(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Software\Microsoft\Windows\CurrentVersion\Run",
+                    0,
+                    winreg.KEY_SET_VALUE,
+                ) as key:
+                    if enabled:
+                        winreg.SetValueEx(key, "VoxCraftStudio", 0, winreg.REG_SZ, self._get_autostart_command())
+                    else:
+                        try:
+                            winreg.DeleteValue(key, "VoxCraftStudio")
+                        except FileNotFoundError:
+                            pass
+                self.app_config["autostart_enabled"] = bool(enabled)
+                self._save_config()
+                return True, ""
+            except Exception as exc:
+                return False, str(exc)
+
+        desktop_path = self._get_linux_desktop_autostart_path()
+        try:
+            if enabled:
+                os.makedirs(os.path.dirname(desktop_path), exist_ok=True)
+                icon_val = ICON_PNG_PATH if os.path.exists(ICON_PNG_PATH) else "voxcraft-studio"
+                entry = (
+                    "[Desktop Entry]\n"
+                    "Type=Application\n"
+                    "Version=1.0\n"
+                    "Name=VoxCraft Studio\n"
+                    "Comment=Real-Time Voice Modulator & DSP Studio\n"
+                    f"Exec={self._get_autostart_command()}\n"
+                    f"Icon={icon_val}\n"
+                    "Terminal=false\n"
+                    "Categories=AudioVideo;Audio;\n"
+                    "X-GNOME-Autostart-enabled=true\n"
+                )
+                with open(desktop_path, "w", encoding="utf-8") as f:
+                    f.write(entry)
+            else:
+                if os.path.exists(desktop_path):
+                    os.remove(desktop_path)
+            self.app_config["autostart_enabled"] = bool(enabled)
+            self._save_config()
+            return True, ""
+        except Exception as exc:
+            return False, str(exc)
+
     def _open_settings_dialog(self):
         existing = getattr(self, "_settings_win", None)
         if existing is not None:
@@ -2903,7 +3365,7 @@ class VoxCraftApp(ctk.CTk):
         win = ctk.CTkToplevel(self)
         self._settings_win = win
         win.title(self._t("settings_title"))
-        w, h = 460, 290
+        w, h = 460, 355
         px = self.winfo_rootx() + max(0, (self.winfo_width() - w) // 2)
         py = self.winfo_rooty() + max(0, (self.winfo_height() - h) // 2)
         win.geometry(f"{w}x{h}+{px}+{py}")
@@ -2986,7 +3448,7 @@ class VoxCraftApp(ctk.CTk):
         lang_card = ctk.CTkFrame(
             win, fg_color=th["card_bg"], corner_radius=12, border_width=1, border_color=th["card_border"]
         )
-        lang_card.pack(fill="x", padx=22, pady=(0, 14))
+        lang_card.pack(fill="x", padx=22, pady=(0, 12))
         lang_lbl = ctk.CTkLabel(
             lang_card,
             text=self._t("language_label"),
@@ -3020,6 +3482,37 @@ class VoxCraftApp(ctk.CTk):
         )
         lang_seg.pack(fill="x", padx=14, pady=(0, 12))
 
+        # Iniciar com o Windows / Sistema
+        startup_key = "startup_label" if sys.platform == "win32" else "startup_label_linux"
+        startup_card = ctk.CTkFrame(
+            win, fg_color=th["card_bg"], corner_radius=12, border_width=1, border_color=th["card_border"]
+        )
+        startup_card.pack(fill="x", padx=22, pady=(0, 14))
+        startup_var = ctk.BooleanVar(value=self._is_autostart_enabled())
+
+        def on_startup_toggle():
+            if updating_modal:
+                return
+            desired = bool(startup_var.get())
+            ok, err = self._set_autostart_enabled(desired)
+            if not ok:
+                startup_var.set(not desired)
+                messagebox.showerror(self._t("err_title"), self._t("startup_err", err=err), parent=win)
+
+        startup_switch = ctk.CTkSwitch(
+            startup_card,
+            text=self._t(startup_key),
+            variable=startup_var,
+            font=self._fonts["md_b"],
+            fg_color=th["track_bg"],
+            progress_color=th["accent"],
+            button_color=th["switch_knob"],
+            button_hover_color=th["switch_knob_hover"],
+            text_color=th["text_primary"],
+            command=on_startup_toggle,
+        )
+        startup_switch.pack(anchor="w", padx=14, pady=12)
+
         close_btn = ctk.CTkButton(
             win,
             text=self._t("close"),
@@ -3045,7 +3538,7 @@ class VoxCraftApp(ctk.CTk):
                 win.title(self._t("settings_title"))
                 win.configure(fg_color=t_now["modal_bg"])
                 title_lbl.configure(text=self._t("settings_title"), text_color=t_now["accent"])
-                theme_card.configure(fg_color=t_now["card_bg"], border_color=t_now["card_border"])
+                theme_card.configure(fg_color=t_now["card_bg"], border_color=t_now["card_border"], bg_color="transparent")
                 theme_lbl.configure(text=self._t("theme_label"), text_color=t_now["text_primary"])
                 theme_options = _get_theme_options()
                 theme_label_to_key = {lbl: key for key, lbl in theme_options}
@@ -3057,13 +3550,14 @@ class VoxCraftApp(ctk.CTk):
                     "unselected_color": t_now["control_bg"],
                     "unselected_hover_color": t_now["control_hover"],
                     "text_color": t_now["seg_text"],
+                    "bg_color": "transparent",
                 }
                 if lang_changed:
                     seg_kw["values"] = [lbl for _, lbl in theme_options]
                 theme_seg.configure(**seg_kw)
                 theme_var.set(cur_lbl)
 
-                lang_card.configure(fg_color=t_now["card_bg"], border_color=t_now["card_border"])
+                lang_card.configure(fg_color=t_now["card_bg"], border_color=t_now["card_border"], bg_color="transparent")
                 lang_lbl.configure(text=self._t("language_label"), text_color=t_now["text_primary"])
                 lang_seg.configure(
                     fg_color=t_now["tab_bg"],
@@ -3072,8 +3566,20 @@ class VoxCraftApp(ctk.CTk):
                     unselected_color=t_now["control_bg"],
                     unselected_hover_color=t_now["control_hover"],
                     text_color=t_now["seg_text"],
+                    bg_color="transparent",
                 )
                 lang_var.set(LANGUAGE_LABELS.get(self.ui_lang, "Português"))
+
+                startup_card.configure(fg_color=t_now["card_bg"], border_color=t_now["card_border"], bg_color="transparent")
+                startup_switch.configure(
+                    text=self._t(startup_key),
+                    fg_color=t_now["track_bg"],
+                    progress_color=t_now["accent"],
+                    button_color=t_now["switch_knob"],
+                    button_hover_color=t_now["switch_knob_hover"],
+                    text_color=t_now["text_primary"],
+                    bg_color="transparent",
+                )
 
                 close_btn.configure(
                     text=self._t("close"),
@@ -3081,6 +3587,7 @@ class VoxCraftApp(ctk.CTk):
                     hover_color=t_now["control_hover"],
                     text_color=t_now["text_primary"],
                     border_color=t_now["control_border"],
+                    bg_color="transparent",
                 )
             finally:
                 updating_modal = False
@@ -3179,6 +3686,24 @@ class VoxCraftApp(ctk.CTk):
 
     def _apply_theme_in_place(self, old_ctk_mode: str):
         th = self._c()
+
+        def _paint_all():
+            self.configure(fg_color=th["window_bg"])
+            for cont in getattr(self, "_transparent_containers", ()):
+                try:
+                    cont.configure(fg_color="transparent", bg_color="transparent")
+                except Exception:
+                    pass
+            for _w, fn in self._theme_hooks:
+                try:
+                    fn(th)
+                except Exception:
+                    pass
+
+        # Atualiza primeiro os fundos dos containers pais antes de trocar o modo do CustomTkinter,
+        # evitando que bordas e cantos arredondados memorizem o branco do tema Light.
+        _paint_all()
+
         if th["ctk_mode"] != old_ctk_mode:
             try:
                 cur_grab = self.grab_current()
@@ -3187,13 +3712,7 @@ class VoxCraftApp(ctk.CTk):
             except Exception:
                 pass
             ctk.set_appearance_mode(th["ctk_mode"])
-        self.configure(fg_color=th["window_bg"])
-
-        for _w, fn in self._theme_hooks:
-            try:
-                fn(th)
-            except Exception:
-                pass
+            _paint_all()
 
         if self._capturing_hotkey:
             self.hotkey_btn.configure(
@@ -3207,6 +3726,10 @@ class VoxCraftApp(ctk.CTk):
         self._update_hotkey_hint()
         if self._active_tab_key == "tab_eq":
             self._draw_eq_curve()
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ #
     # Guia Discord & Fechamento / Bandeja
@@ -3721,9 +4244,22 @@ class VoxCraftApp(ctk.CTk):
             except Exception:
                 pass
             self._tray_icon = None
+        if _SINGLE_INSTANCE is not None:
+            _SINGLE_INSTANCE.release()
         self.destroy()
 
 
 if __name__ == "__main__":
+    _SINGLE_INSTANCE = _VoxCraftSingleInstance()
+    _wait_sec = 2.5 if "--relaunch" in sys.argv else 0.0
+    if not _SINGLE_INSTANCE.acquire(wait_timeout=_wait_sec):
+        if "--relaunch" not in sys.argv:
+            _SINGLE_INSTANCE.notify_existing()
+        sys.exit(0)
+
     app = VoxCraftApp()
-    app.mainloop()
+    _SINGLE_INSTANCE.start_ipc_server(lambda: app.after(0, app._restore_from_tray))
+    try:
+        app.mainloop()
+    finally:
+        _SINGLE_INSTANCE.release()

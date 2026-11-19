@@ -40,13 +40,21 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 english.UninstallApp=Uninstall {#MyAppName}
 portuguese.UninstallApp=Desinstalar {#MyAppName}
 spanish.UninstallApp=Desinstalar {#MyAppName}
+english.AdditionalSoftware=Optional audio driver:
+portuguese.AdditionalSoftware=Driver de áudio opcional:
+spanish.AdditionalSoftware=Controlador de audio opcional:
+english.InstallVBCable=Download and install VB-Audio Virtual Cable (for Discord & games)
+portuguese.InstallVBCable=Baixar e instalar VB-Audio Virtual Cable (para Discord e jogos)
+spanish.InstallVBCable=Descargar e instalar VB-Audio Virtual Cable (para Discord y juegos)
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "installvbcable"; Description: "{cm:InstallVBCable}"; GroupDescription: "{cm:AdditionalSoftware}"; Flags: unchecked
 
 [Files]
 Source: "dist\VoxCraftStudio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "assets\voxcraft.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
+Source: "packaging\windows\install_vbcable.ps1"; DestDir: "{tmp}"; Flags: deleteafterinstall; Tasks: installvbcable
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
@@ -54,6 +62,7 @@ Name: "{group}\{cm:UninstallApp}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\install_vbcable.ps1"""; Tasks: installvbcable; Flags: waituntilterminated runhidden skipifsilent
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]

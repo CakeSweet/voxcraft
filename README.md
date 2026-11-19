@@ -23,13 +23,27 @@ Modulador de voz em tempo real e estúdio DSP para desktop Windows (com suporte 
 - **Presets**: Built-in voice presets plus custom user presets (`★`) saved locally.
 - **Global Hotkeys**: Switch between processed voice and clean bypass globally—even in full-screen games or when minimized to the system tray—supporting keyboard combinations and **Mouse 4 / Mouse 5** in Toggle or Hold mode.
 - **Monitoring & Visualizers**: Optional headphone monitoring (`Hear my voice`), real-time Input/Output VU meters, and live waveform oscilloscope.
-- **Themes & Languages**: Switch live in **Settings** between **Dark**, **Pure Dark (OLED)**, and **Light** themes, and between **English**, **Português**, and **Español**.
-- **Built-in Updater**: Check and install new GitHub Releases (or local `.exe` / `.zip` packages) while keeping all audio devices, presets, and settings intact.
+- **Themes, Languages & Startup**: Switch live in **Settings** between **Dark**, **Pure Dark (OLED)**, and **Light** themes, between **English**, **Português**, and **Español**, and toggle **Start with Windows** (or system autostart on Linux).
+- **Single-Instance & System Tray**: Minimizes cleanly to the system tray; launching VoxCraft Studio again focuses the running window instead of spawning duplicate tray icons.
+- **Built-in Updater**: Checks GitHub Releases by version (only downloading/restarting when a newer version exists) or installs from local `.exe` / `.zip` packages while keeping your audio devices, presets, and settings intact.
 
 ### Installation (Windows)
 
-1. Download **`VoxCraftStudio_Setup.exe`** (installer) or **`VoxCraftStudio.exe`** (portable) from the **Releases** page.
-2. Run the installer, choose your preferred installer language (**English**, **Português**, or **Español**), and launch **VoxCraft Studio**.
+1. Download **`VoxCraftStudio_Setup_v<version>.exe`** (installer) or **`VoxCraftStudio_Portable_v<version>.exe`** (portable) from the **Releases** page (full version history is preserved on GitHub Releases).
+2. Run the installer, select your preferred installer language (**English** by default, **Português**, or **Español**), optionally check **Download and install VB-Audio Virtual Cable**, and launch **VoxCraft Studio**.
+
+### Installation (Linux `.deb` / `.rpm`)
+
+1. Download the package matching your distro from the **Releases** page:
+   - **Debian / Ubuntu / Mint / Pop!_OS**:
+     ```bash
+     sudo apt install ./voxcraft-studio_<version>_amd64.deb
+     ```
+   - **Fedora / RHEL / openSUSE**:
+     ```bash
+     sudo dnf install ./voxcraft-studio-<version>-1.x86_64.rpm
+     ```
+2. Launch **VoxCraft Studio** from your application menu or run `voxcraft-studio`.
 
 ### Discord & Games Routing (VB-Audio Virtual Cable)
 
@@ -50,15 +64,20 @@ pip install -r requirements.txt
 python app.py
 ```
 
-### Building the Windows Installer
+### Building Installers (Windows & Linux)
 
-Requires Python 3.11+, PyInstaller, and **Inno Setup 6**:
+- **Windows** (Python 3.11+, PyInstaller, and **Inno Setup 6**):
+  ```bat
+  build_installer.bat
+  ```
+  Output: `Output\VoxCraftStudio_Setup.exe`.
 
-```bat
-build_installer.bat
-```
-
-The compiled installer is output to `Output\VoxCraftStudio_Setup.exe`.
+- **Linux `.deb` & `.rpm`** (Python 3.11+, PyInstaller, `portaudio19-dev`, `python3-tk`, `dpkg`, `rpm`):
+  ```bash
+  chmod +x packaging/linux/build_linux_packages.sh
+  ./packaging/linux/build_linux_packages.sh
+  ```
+  Output: `Output/voxcraft-studio_<version>_amd64.deb` and `Output/voxcraft-studio-<version>-1.x86_64.rpm`.
 
 ---
 
@@ -78,13 +97,27 @@ O **VoxCraft Studio** é um modulador de voz e processador de efeitos DSP em tem
 - **Presets**: Presets prontos e suporte para salvar/excluir vozes personalizadas (`★`).
 - **Atalho Global (Hotkeys)**: Alterne entre a voz com efeito e a voz original limpa mesmo em jogos em tela cheia ou minimizado na bandeja do sistema, com suporte a combinações de teclado e **Mouse 4 / Mouse 5** no modo alternar ou segurar.
 - **Monitoramento e Visualização**: Opção **Ouvir minha voz** nos fones, medidores VU de entrada/saída e osciloscópio em tempo real.
-- **Temas e Idiomas**: Altere em **Configurações** entre os temas **Escuro (Dark)**, **Dark Puro (OLED)** e **Claro (Light)**, e entre os idiomas **Português**, **English** e **Español**.
-- **Atualizador Integrado**: Baixe e instale atualizações do GitHub Releases (ou pacotes `.exe` / `.zip` locais) preservando automaticamente seus dispositivos, presets e preferências.
+- **Temas, Idiomas e Inicialização**: Altere em **Configurações** entre os temas **Escuro (Dark)**, **Dark Puro (OLED)** e **Claro (Light)**, entre **Português**, **English** e **Español**, e ative ou desative **Iniciar com o Windows** (ou login automático no Linux).
+- **Instância Única e Bandeja do Sistema**: Minimiza para a bandeja; abrir o VoxCraft Studio novamente restaura a janela já aberta em vez de duplicar o ícone na bandeja.
+- **Atualizador Integrado**: Compara a versão instalada com a última Release no GitHub (só baixa e reinicia se houver uma versão mais recente) e preserva automaticamente seus dispositivos, presets e preferências.
 
 ### Instalação (Windows)
 
-1. Baixe **`VoxCraftStudio_Setup.exe`** (instalador) ou **`VoxCraftStudio.exe`** (portátil) na página de **Releases**.
-2. Execute o instalador, escolha o idioma desejado na instalação (**English**, **Português** ou **Español**) e abra o **VoxCraft Studio**.
+1. Baixe **`VoxCraftStudio_Setup_v<versão>.exe`** (instalador) ou **`VoxCraftStudio_Portable_v<versão>.exe`** (portátil) na página de **Releases** (com histórico completo de versões).
+2. Execute o instalador, escolha o idioma desejado (**English** por padrão, **Português** ou **Español**), marque se desejar a opção **Baixar e instalar VB-Audio Virtual Cable** e abra o **VoxCraft Studio**.
+
+### Instalação (Linux `.deb` / `.rpm`)
+
+1. Baixe o pacote compatível com a sua distribuição na página de **Releases**:
+   - **Debian / Ubuntu / Mint / Pop!_OS**:
+     ```bash
+     sudo apt install ./voxcraft-studio_<versão>_amd64.deb
+     ```
+   - **Fedora / RHEL / openSUSE**:
+     ```bash
+     sudo dnf install ./voxcraft-studio-<versão>-1.x86_64.rpm
+     ```
+2. Abra o **VoxCraft Studio** pelo menu de aplicativos ou execute `voxcraft-studio`.
 
 ### Configuração no Discord e Jogos (VB-Audio Virtual Cable)
 
@@ -105,12 +138,17 @@ pip install -r requirements.txt
 python app.py
 ```
 
-### Gerar o Instalador Windows
+### Gerar Instaladores (Windows e Linux)
 
-Requer Python 3.11+, PyInstaller e **Inno Setup 6**:
+- **Windows** (Python 3.11+, PyInstaller e **Inno Setup 6**):
+  ```bat
+  build_installer.bat
+  ```
+  Saída em `Output\VoxCraftStudio_Setup.exe`.
 
-```bat
-build_installer.bat
-```
-
-O instalador final será gerado em `Output\VoxCraftStudio_Setup.exe`.
+- **Linux `.deb` e `.rpm`** (Python 3.11+, PyInstaller, `portaudio19-dev`, `python3-tk`, `dpkg`, `rpm`):
+  ```bash
+  chmod +x packaging/linux/build_linux_packages.sh
+  ./packaging/linux/build_linux_packages.sh
+  ```
+  Saída em `Output/voxcraft-studio_<versão>_amd64.deb` e `Output/voxcraft-studio-<versão>-1.x86_64.rpm`.

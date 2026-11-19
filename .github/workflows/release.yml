@@ -1,4 +1,4 @@
-name: Build & Publish Windows Installer (.exe)
+name: Build & Publish Releases (Windows, Linux .deb & .rpm)
 
 on:
   push:
@@ -10,15 +10,104 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Tag/Versão da Release (ex: v2.1.0)"
+        description: "Versão/Tag opcional da Release (ex: v2.1.1). Deixe vazio para auto-versionar."
         required: false
-        default: "latest"
+        default: ""
 
 permissions:
   contents: write
 
 jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      commit: ${{ github.sha }}
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute versioned release tag & create GitHub Release
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BASE_VER="$(python3 - <<'PY'
+          import re
+          with open("app.py", "r", encoding="utf-8") as f:
+              m = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', f.read(), re.M)
+          print(m.group(1) if m else "2.1.0")
+          PY
+          )"
+
+          TAG=""
+          VER=""
+          INPUT_VER="${{ inputs.version }}"
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+            VER="${TAG#v}"
+            VER="${VER#V}"
+          elif [ -n "$INPUT_VER" ] && [ "$INPUT_VER" != "latest" ]; then
+            VER="${INPUT_VER#v}"
+            VER="${VER#V}"
+            TAG="v${VER}"
+          else
+            CAND="v${BASE_VER}"
+            if git rev-parse -q --verify "refs/tags/$CAND" >/dev/null || gh release view "$CAND" >/dev/null 2>&1; then
+              VER="${BASE_VER}.${{ github.run_number }}"
+              TAG="v${VER}"
+            else
+              VER="${BASE_VER}"
+              TAG="v${VER}"
+            fi
+          fi
+
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG" "${{ github.sha }}"
+            git push origin "$TAG" || true
+          fi
+
+          PREV_TAG="$(git tag --list 'v*' --sort=-v:refname | grep -Fxv "$TAG" | head -n 1 || true)"
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG="$(git log "${PREV_TAG}..${{ github.sha }}" --pretty=format:'- %s (`%h`)' -n 25 || true)"
+          else
+            CHANGELOG="$(git log "${{ github.sha }}" --pretty=format:'- %s (`%h`)' -n 15 || true)"
+          fi
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- Build automated release \`${TAG}\` (${{ github.sha }})"
+          fi
+
+          NOTES_FILE="$(mktemp)"
+          cat > "$NOTES_FILE" <<EOF
+          ## VoxCraft Studio ${TAG}
+
+          ### Downloads
+          - **Windows Installer**: \`VoxCraftStudio_Setup_v${VER}.exe\` *(inclui opção de instalar o VB-Audio Virtual Cable)*
+          - **Windows Portable**: \`VoxCraftStudio_Portable_v${VER}.exe\` *(executável único sem instalação)*
+          - **Linux (Debian / Ubuntu)**: \`voxcraft-studio_${VER}_amd64.deb\`
+          - **Linux (Fedora / RHEL / openSUSE)**: \`voxcraft-studio-${VER}-1.x86_64.rpm\`
+
+          ### Changes
+          ${CHANGELOG}
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "VoxCraft Studio ${TAG}" --notes-file "$NOTES_FILE" --latest
+          else
+            gh release create "$TAG" --target "${{ github.sha }}" --title "VoxCraft Studio ${TAG}" --notes-file "$NOTES_FILE" --latest
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
   build-windows-release:
+    needs: prepare-release
     runs-on: windows-latest
     steps:
       - name: Checkout repository
@@ -34,10 +123,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      - name: Embed build repository metadata
+      - name: Embed build version metadata
         shell: pwsh
         run: |
-          @{ repo = "${{ github.repository }}" } | ConvertTo-Json | Set-Content -Path "assets\build_info.json" -Encoding UTF8
+          @{
+            repo = "${{ github.repository }}"
+            version = "${{ needs.prepare-release.outputs.version }}"
+            tag = "${{ needs.prepare-release.outputs.tag }}"
+            commit = "${{ needs.prepare-release.outputs.commit }}"
+          } | ConvertTo-Json | Set-Content -Path "assets\build_info.json" -Encoding UTF8
 
       - name: Build VoxCraftStudio (Folder for Installer)
         run: |
@@ -75,47 +169,71 @@ jobs:
           }
           "ISCC_EXE=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Compile Installer (VoxCraftStudio_Setup.exe)
+      - name: Compile Versioned Windows Setup & Portable
         shell: pwsh
         run: |
-          $ver = "2.1.0"
-          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -match '^[vV]?(\d+\.\d+\.\d+)') {
-            $ver = $Matches[1]
-          } elseif ("${{ inputs.version }}" -match '^[vV]?(\d+\.\d+\.\d+)') {
-            $ver = $Matches[1]
-          }
-          & "$env:ISCC_EXE" "/DMyAppVersion=$ver" "installer.iss"
-          Copy-Item "dist\VoxCraftStudio-Portable.exe" "Output\VoxCraftStudio.exe" -Force
+          $ver = "${{ needs.prepare-release.outputs.version }}"
+          & "$env:ISCC_EXE" "/DMyAppVersion=$ver" "/FVoxCraftStudio_Setup_v$ver" "installer.iss"
+          Copy-Item "dist\VoxCraftStudio-Portable.exe" "Output\VoxCraftStudio_Portable_v$ver.exe" -Force
 
-      - name: Publish .exe assets to GitHub Releases
+      - name: Upload Windows assets to Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = if ("${{ github.ref_type }}" -eq "tag") {
-            "${{ github.ref_name }}"
-          } elseif ("${{ inputs.version }}" -and "${{ inputs.version }}" -ne "") {
-            "${{ inputs.version }}"
-          } else {
-            "latest"
-          }
-          $title = if ($tag -eq "latest") { "VoxCraft Studio (Última Versão)" } else { "VoxCraft Studio $tag" }
-          $notes = "Instalador direto para Windows:`n- **VoxCraftStudio_Setup.exe**: Instalador completo (Menu Iniciar, Área de Trabalho e Desinstalador)`n- **VoxCraftStudio.exe**: Executável portátil direto (clique e use, sem instalar)"
+          $tag = "${{ needs.prepare-release.outputs.tag }}"
+          $ver = "${{ needs.prepare-release.outputs.version }}"
+          gh release upload "$tag" `
+            "Output\VoxCraftStudio_Setup_v$ver.exe" `
+            "Output\VoxCraftStudio_Portable_v$ver.exe" `
+            --clobber
 
-          $exists = $true
-          gh release view $tag 2>$null | Out-Null
-          if ($LASTEXITCODE -ne 0) { $exists = $false }
+  build-linux-release:
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-          if (-not $exists) {
-            gh release create $tag `
-              "Output\VoxCraftStudio_Setup.exe" `
-              "Output\VoxCraftStudio.exe" `
-              --title "$title" `
-              --notes "$notes" `
-              --latest
-          } else {
-            gh release upload $tag `
-              "Output\VoxCraftStudio_Setup.exe" `
-              "Output\VoxCraftStudio.exe" `
-              --clobber
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system packaging & audio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 portaudio19-dev python3-tk dpkg rpm
+
+      - name: Install Python dependencies & PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Embed build version metadata
+        run: |
+          python3 - <<'PY'
+          import json
+          data = {
+              "repo": "${{ github.repository }}",
+              "version": "${{ needs.prepare-release.outputs.version }}",
+              "tag": "${{ needs.prepare-release.outputs.tag }}",
+              "commit": "${{ needs.prepare-release.outputs.commit }}",
           }
+          with open("assets/build_info.json", "w", encoding="utf-8") as f:
+              json.dump(data, f, indent=2)
+          PY
+
+      - name: Build Linux .deb and .rpm packages
+        run: |
+          chmod +x packaging/linux/build_linux_packages.sh
+          ./packaging/linux/build_linux_packages.sh "${{ needs.prepare-release.outputs.version }}"
+
+      - name: Upload Linux .deb & .rpm assets to Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.prepare-release.outputs.tag }}" \
+            Output/*.deb \
+            Output/*.rpm \
+            --clobber
