@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VoxCraft Studio — Modulador de Voz em Tempo Real e Estúdio DSP</title>
+  <meta name="description" content="Modulador de voz nativo em tempo real com 24 presets, cadeia DSP completa, latência baixa para Discord/OBS e pacotes para Windows e Linux." />
+  <meta property="og:title" content="VoxCraft Studio — Modulador de Voz em Tempo Real" />
+  <meta property="og:description" content="Estúdio DSP nativo com Pitch Shifter, Vocoder, EQ Paramétrico de 5 Bandas, Compressor, Reverb e roteamento direto para Discord e OBS." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="assets/voxcraft.png" />
+  <link rel="icon" type="image/png" href="assets/voxcraft.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main-content" data-i18n="skip_content">Pular para o conteúdo</a>
+
+  <header class="topbar" id="top">
+    <div class="topbar-inner">
+      <a href="#top" class="brand" aria-label="VoxCraft Studio">
+        <img src="assets/voxcraft.png" alt="VoxCraft Studio" width="24" height="24" referrerpolicy="no-referrer" />
+        <span>VoxCraft Studio</span>
+      </a>
+
+      <nav class="nav-links" aria-label="Navegação principal">
+        <a href="#studio" data-i18n="nav_studio">Estúdio</a>
+        <a href="#pipeline" data-i18n="nav_pipeline">Cadeia DSP</a>
+        <a href="#presets" data-i18n="nav_presets">Presets</a>
+        <a href="#download" data-i18n="nav_download">Download</a>
+      </nav>
+
+      <div class="topbar-action">
+        <a href="#download" class="btn btn-primary btn-sm" data-i18n="nav_cta">Baixar Agora</a>
+        <button type="button" class="mobile-menu-btn" id="mobileMenuBtn" aria-expanded="false" aria-controls="mobileDrawer" aria-label="Abrir menu">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M3 5.5H17M3 10H17M3 14.5H17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="mobile-drawer" id="mobileDrawer" hidden>
+      <a href="#studio" data-i18n="nav_studio">Estúdio</a>
+      <a href="#pipeline" data-i18n="nav_pipeline">Cadeia DSP</a>
+      <a href="#presets" data-i18n="nav_presets">Presets</a>
+      <a href="#download" data-i18n="nav_download">Download</a>
+    </div>
+  </header>
+
+  <main id="main-content">
+    <section class="hero section">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <p class="meta-line" id="heroMeta">
+            <span id="releaseVersionText">v2.1.0</span>
+            <span aria-hidden="true">&middot;</span>
+            <span data-i18n="hero_os">Windows &amp; Linux (.deb / .rpm)</span>
+            <span aria-hidden="true">&middot;</span>
+            <span data-i18n="hero_license">Open Source</span>
+          </p>
+
+          <h1 class="hero-title" data-i18n="hero_title">
+            Modulação de voz em tempo real com processamento DSP nativo.
+          </h1>
+
+          <p class="hero-subtitle" data-i18n="hero_subtitle">
+            Transforme seu microfone no Discord, OBS ou jogos sem mensalidades, sem nuvem e com controle completo sobre Pitch, Vocoder, Equalizador de 5 bandas e dinâmica de estúdio.
+          </p>
+
+          <div class="hero-actions">
+            <a href="#download" class="btn btn-primary" data-i18n="hero_primary_cta">Baixar VoxCraft Studio</a>
+            <a href="#studio" class="btn btn-secondary" data-i18n="hero_secondary_cta">Explorar Painel DSP</a>
+          </div>
+
+          <dl class="hero-specs">
+            <div>
+              <dt data-i18n="spec_latency_label">Bloco mínimo</dt>
+              <dd class="mono tabular">5.3 ms <span class="spec-sub">(256 @ 48 kHz)</span></dd>
+            </div>
+            <div>
+              <dt data-i18n="spec_presets_label">Presets nativos</dt>
+              <dd class="mono tabular" data-i18n="spec_presets_val">24 vozes + custom</dd>
+            </div>
+            <div>
+              <dt data-i18n="spec_privacy_label">Execução</dt>
+              <dd data-i18n="spec_privacy_val">100% local / offline</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="hero-media">
+          <div class="media-frame">
+            <img
+              src="assets/studio-hero.jpg"
+              alt="Microfone condensador em cabine acústica iluminada com luz fria de estúdio"
+              referrerpolicy="no-referrer"
+            />
+            <div class="media-caption">
+              <span class="mono">48 kHz FLOAT32</span>
+              <span aria-hidden="true">&middot;</span>
+              <span data-i18n="hero_caption">WASAPI, DirectSound &amp; PipeWire / ALSA</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="studio-section section" id="studio">
+      <div class="container">
+        <div class="section-head studio-head">
+          <div>
+            <p class="section-kicker" data-i18n="studio_kicker">01. Prévia Interativa do Estúdio</p>
+            <h2 class="section-title" data-i18n="studio_title">Mesma paleta, mesmos efeitos, antes mesmo de instalar.</h2>
+          </div>
+
+          <div class="studio-prefs" aria-label="Preferências de tema e idioma">
+            <div class="segmented" role="group" aria-label="Tema visual">
+              <button type="button" class="seg-btn active" data-theme-choice="dark">Dark</button>
+              <button type="button" class="seg-btn" data-theme-choice="oled">OLED</button>
+              <button type="button" class="seg-btn" data-theme-choice="light">Light</button>
+            </div>
+            <div class="segmented" role="group" aria-label="Idioma da página">
+              <button type="button" class="seg-btn active" data-lang-choice="pt">PT</button>
+              <button type="button" class="seg-btn" data-lang-choice="en">EN</button>
+              <button type="button" class="seg-btn" data-lang-choice="es">ES</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="workbench" role="region" aria-label="Simulador visual do VoxCraft Studio">
+          <div class="workbench-top">
+            <div class="wb-brand">
+              <img src="assets/voxcraft.png" alt="" width="20" height="20" referrerpolicy="no-referrer" />
+              <span>VoxCraft Studio</span>
+            </div>
+
+            <div class="wb-preset-wrap">
+              <label for="wbPresetSelect" data-i18n="wb_preset_label">Preset:</label>
+              <select id="wbPresetSelect" class="wb-select" aria-label="Selecionar preset de voz"></select>
+            </div>
+
+            <div class="wb-actions">
+              <button type="button" class="wb-toggle" id="wbBypassBtn" aria-pressed="false">
+                <span data-i18n="wb_bypass">Voz Original</span>
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" id="wbPowerBtn" aria-pressed="true" data-i18n="wb_audio_active">
+                Áudio Ativo
+              </button>
+            </div>
+          </div>
+
+          <div class="workbench-body">
+            <aside class="wb-sidebar">
+              <div class="wb-group">
+                <h3 data-i18n="wb_routing_title">Roteamento de Áudio</h3>
+                <div class="wb-field">
+                  <span class="wb-field-label" data-i18n="wb_mic_label">Microfone (Entrada)</span>
+                  <div class="wb-readonly mono">[WASAPI] Studio USB Mic</div>
+                </div>
+                <div class="wb-field">
+                  <span class="wb-field-label" data-i18n="wb_out_label">Saída Processada</span>
+                  <div class="wb-readonly mono">[WASAPI] CABLE Input (VB-Audio)</div>
+                </div>
+                <div class="wb-route-meta mono tabular" id="wbStatusText">
+                  Ativo: 48000 Hz | Bloco 512 (~10.7 ms)
+                </div>
+              </div>
+
+              <div class="wb-group">
+                <h3 data-i18n="wb_active_chain">Módulos Ativos</h3>
+                <ul class="chain-list" id="wbChainList"></ul>
+              </div>
+            </aside>
+
+            <div class="wb-main">
+              <div class="wb-controls-grid">
+                <div class="slider-box">
+                  <div class="slider-head">
+                    <label for="sliderPitch" data-i18n="ctl_pitch">Pitch (Semitons)</label>
+                    <span class="mono tabular" id="valPitch">0.0 st</span>
+                  </div>
+                  <input id="sliderPitch" type="range" min="-12" max="12" step="0.5" value="0" />
+                </div>
+
+                <div class="slider-box">
+                  <div class="slider-head">
+                    <label for="sliderHpf" data-i18n="ctl_hpf">Corte de Graves (HPF)</label>
+                    <span class="mono tabular" id="valHpf">80 Hz</span>
+                  </div>
+                  <input id="sliderHpf" type="range" min="20" max="400" step="5" value="80" />
+                </div>
+
+                <div class="slider-box">
+                  <div class="slider-head">
+                    <label for="sliderPresence" data-i18n="ctl_presence">Presença Vocal (3 kHz)</label>
+                    <span class="mono tabular" id="valPresence">+1.5 dB</span>
+                  </div>
+                  <input id="sliderPresence" type="range" min="-12" max="12" step="0.5" value="1.5" />
+                </div>
+
+                <div class="slider-box">
+                  <div class="slider-head">
+                    <label for="sliderReverb" data-i18n="ctl_reverb">Espaço / Reverb Mix</label>
+                    <span class="mono tabular" id="valReverb">0%</span>
+                  </div>
+                  <input id="sliderReverb" type="range" min="0" max="100" step="1" value="0" />
+                </div>
+              </div>
+
+              <div class="canvas-grid">
+                <div class="canvas-panel">
+                  <div class="canvas-head">
+                    <span data-i18n="canvas_eq_title">Curva de Equalização (20 Hz – 20 kHz)</span>
+                    <span class="mono tabular" id="eqPeakBadge">HPF 80 Hz</span>
+                  </div>
+                  <canvas id="eqCanvas" width="560" height="190" data-testid="eq-canvas"></canvas>
+                </div>
+
+                <div class="canvas-panel">
+                  <div class="canvas-head">
+                    <span data-i18n="canvas_wave_title">Osciloscópio de Saída</span>
+                    <span class="mono tabular" id="waveModeBadge">DSP</span>
+                  </div>
+                  <canvas id="waveCanvas" width="320" height="190" data-testid="wave-canvas"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="pipeline">
+      <div class="container">
+        <div class="section-head">
+          <p class="section-kicker" data-i18n="pipe_kicker">02. Arquitetura de Áudio</p>
+          <h2 class="section-title" data-i18n="pipe_title">Projetado para voz limpa, baixa latência e controle total no desktop.</h2>
+        </div>
+
+        <div class="bento-grid">
+          <article class="feature-card span-2">
+            <span class="feature-index mono">01</span>
+            <h3 data-i18n="feat_1_title">Cadeia DSP em tempo real sem dependências na nuvem</h3>
+            <p data-i18n="feat_1_desc">
+              Processamento em bloco contínuo com NumPy e SciPy: Noise Gate opcional, Compressor RMS, Pitch Shifter sem perda de cadência, Frequency Shifter, Vocoder com portadoras sintetizadas, Equalizador de 5 bandas com filtros HPF/LPF, Chorus/Flanger, Phaser multi-estágio, Auto-Wah, Ring Modulator, Distortion/Bitcrusher, Echo e Reverb Schroeder.
+            </p>
+            <p class="feature-meta mono">
+              <span>Float32</span>
+              <span aria-hidden="true">&middot;</span>
+              <span>256 / 512 / 1024 frames</span>
+              <span aria-hidden="true">&middot;</span>
+              <span data-i18n="feat_1_meta">Resampling automático entre dispositivos</span>
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <span class="feature-index mono">02</span>
+            <h3 data-i18n="feat_2_title">Atalho Global Instantâneo</h3>
+            <p data-i18n="feat_2_desc">
+              Alterne entre voz modificada e voz natural com uma tecla (ex: F9 ou botões laterais do mouse) no modo Alternar ou Segurar para falar com efeito, sem cortes ou áudio preso ao soltar.
+            </p>
+          </article>
+
+          <article class="feature-card">
+            <span class="feature-index mono">03</span>
+            <h3 data-i18n="feat_3_title">Roteamento para Discord, OBS e Jogos</h3>
+            <p data-i18n="feat_3_desc">
+              Envie sua voz processada para o VB-Cable no Windows ou sink virtual no Linux com monitoramento local separado nos seus fones e fallback automático de APIs (WASAPI, DirectSound e MME).
+            </p>
+          </article>
+
+          <article class="feature-card span-2">
+            <span class="feature-index mono">04</span>
+            <h3 data-i18n="feat_4_title">Experiência nativa no Windows e no Linux</h3>
+            <p data-i18n="feat_4_desc">
+              Suporte a instância única, inicialização automática com o sistema, bandeja do sistema, barra de janela personalizada no Linux (com Minimizar, Maximizar/Restaurar e Fechar) e atualizador integrado por releases versionadas no GitHub.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="presets">
+      <div class="container">
+        <div class="section-head">
+          <p class="section-kicker" data-i18n="presets_kicker">03. Biblioteca Nativa</p>
+          <h2 class="section-title" data-i18n="presets_title">24 presets prontos de fábrica e vozes personalizadas ilimitadas.</h2>
+        </div>
+
+        <div class="preset-categories" id="presetShowcaseGrid"></div>
+      </div>
+    </section>
+
+    <section class="section download-section" id="download">
+      <div class="container">
+        <div class="download-layout">
+          <div class="download-intro">
+            <p class="section-kicker" data-i18n="dl_kicker">04. Instalação e Releases</p>
+            <h2 class="section-title" data-i18n="dl_title">Baixe a versão mais recente para o seu sistema.</h2>
+            <p class="download-lead" data-i18n="dl_lead">
+              Cada release no GitHub publica instaladores versionados para Windows e pacotes nativos .deb e .rpm para distribuições Linux.
+            </p>
+
+            <div class="platform-tabs" role="tablist" aria-label="Plataformas disponíveis">
+              <button type="button" class="plat-tab active" role="tab" aria-selected="true" data-platform="windows">Windows</button>
+              <button type="button" class="plat-tab" role="tab" aria-selected="false" data-platform="deb">Linux (.deb)</button>
+              <button type="button" class="plat-tab" role="tab" aria-selected="false" data-platform="rpm">Linux (.rpm)</button>
+              <button type="button" class="plat-tab" role="tab" aria-selected="false" data-platform="source" data-i18n="tab_source">Código-Fonte</button>
+            </div>
+          </div>
+
+          <div class="download-card" id="downloadCard" role="tabpanel">
+            <div class="dl-card-head">
+              <div>
+                <h3 id="dlHeading">Instalador Windows + Executável Portátil</h3>
+                <p class="dl-meta mono tabular" id="dlMetaLine">Versão v2.1.0 &middot; Windows 10 / 11 (x64)</p>
+              </div>
+              <a id="dlReleaseTagLink" href="https://github.com/CakeSweet/voxcraft/releases" target="_blank" rel="noopener noreferrer" class="text-link">
+                <span data-i18n="dl_all_releases">Histórico de Releases</span>
+              </a>
+            </div>
+
+            <p id="dlDescription" class="dl-desc">
+              O instalador inclui opção para baixar e instalar o VB-Audio Virtual Cable automaticamente caso você queira usar no Discord ou jogos.
+            </p>
+
+            <div class="dl-actions" id="dlActionButtons"></div>
+
+            <div class="dl-cmd-wrap" id="dlCmdWrap">
+              <code id="dlCmdCode" class="mono"></code>
+              <button type="button" class="btn btn-secondary btn-sm" id="dlCopyBtn" data-i18n="copy_cmd">Copiar</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="assets/voxcraft.png" alt="" width="20" height="20" referrerpolicy="no-referrer" />
+        <span>VoxCraft Studio</span>
+        <span aria-hidden="true">&middot;</span>
+        <span class="footer-copy" data-i18n="footer_note">Modulador de voz desktop nativo em Python</span>
+      </div>
+
+      <div class="footer-links">
+        <a href="https://github.com/CakeSweet/voxcraft" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/CakeSweet/voxcraft/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+        <a href="https://github.com/CakeSweet/voxcraft/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
