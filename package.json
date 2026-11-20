@@ -1,0 +1,10 @@
+{
+  "name": "voxcraft-pages-preview",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "python3 -B -c \"import http.server, functools; h = functools.partial(http.server.SimpleHTTPRequestHandler, directory='docs'); http.server.ThreadingHTTPServer(('0.0.0.0', 3000), h).serve_forever()\"",
+    "build": "python3 -B -c \"import pathlib; assert pathlib.Path('docs/index.html').is_file()\"",
+    "lint": "node -c docs/app.js"
+  }
+}

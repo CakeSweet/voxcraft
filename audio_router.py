@@ -440,10 +440,15 @@ class AudioRouter:
                             eff_blk = blk if blk > 0 else blocksize
                             prefix = f"Ativo ({api_note}):" if api_note else "Ativo:"
                             msg = f"{prefix} {sr} Hz | Bloco {eff_blk} (~{eff_blk * 1000 / sr:.1f} ms)"
-                            if self.monitor_enabled and monitor_idx is not None:
+                            if self.monitor_enabled and monitor_idx is not None and monitor_idx != out_idx:
                                 mon_err = self._start_monitor(monitor_idx, sr, blk)
                                 if mon_err:
+                                    self.monitor_enabled = False
+                                    self._mon_fifo.clear()
                                     msg += f" | Monitor off: {mon_err}"
+                            elif self.monitor_enabled and monitor_idx == out_idx:
+                                self.monitor_enabled = False
+                                self._mon_fifo.clear()
                             return True, msg
                         except Exception as e:
                             last_err = str(e)
@@ -529,10 +534,15 @@ class AudioRouter:
                     eff_blk = blk if blk > 0 else blocksize
                     prefix = f"Ativo (Ponte • {api_note}):" if api_note else "Ativo (Ponte):"
                     msg = f"{prefix} {sr_txt} | Bloco {eff_blk}"
-                    if self.monitor_enabled and monitor_idx is not None:
+                    if self.monitor_enabled and monitor_idx is not None and monitor_idx != out_idx:
                         mon_err = self._start_monitor(monitor_idx, out_sr, blk)
                         if mon_err:
+                            self.monitor_enabled = False
+                            self._mon_fifo.clear()
                             msg += f" | Monitor off: {mon_err}"
+                    elif self.monitor_enabled and monitor_idx == out_idx:
+                        self.monitor_enabled = False
+                        self._mon_fifo.clear()
                     return True, msg
                 except Exception as e:
                     last_err = str(e)

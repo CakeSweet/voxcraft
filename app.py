@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import filedialog, font as tkfont, messagebox, simpledialog
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -49,9 +49,33 @@ IS_FROZEN = bool(getattr(sys, "frozen", False))
 IS_LINUX = sys.platform.startswith("linux")
 BASE_DIR = os.path.dirname(os.path.abspath(sys.executable if IS_FROZEN else __file__))
 ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", BASE_DIR), "assets")
+FONTS_DIR = os.path.join(ASSETS_DIR, "fonts")
 ICON_ICO_PATH = os.path.join(ASSETS_DIR, "voxcraft.ico")
 ICON_PNG_PATH = os.path.join(ASSETS_DIR, "voxcraft.png")
 BUILD_INFO_PATH = os.path.join(ASSETS_DIR, "build_info.json")
+
+
+def _load_bundled_fonts() -> None:
+    if not os.path.isdir(FONTS_DIR):
+        return
+    try:
+        entries = sorted(f for f in os.listdir(FONTS_DIR) if f.lower().endswith((".ttf", ".otf")))
+    except Exception:
+        return
+    for fname in entries:
+        fpath = os.path.join(FONTS_DIR, fname)
+        try:
+            ctk.FontManager.load_font(fpath)
+        except Exception:
+            pass
+        if sys.platform == "win32":
+            try:
+                ctypes.windll.gdi32.AddFontResourceExW(fpath, 0x10, 0)
+            except Exception:
+                pass
+
+
+_load_bundled_fonts()
 
 
 def _get_app_data_dir(create: bool = True) -> str:
@@ -331,7 +355,8 @@ def _load_or_create_pil_icon():
         return None
     if os.path.exists(ICON_PNG_PATH):
         try:
-            return Image.open(ICON_PNG_PATH).convert("RGBA")
+            with Image.open(ICON_PNG_PATH) as im:
+                return im.convert("RGBA")
         except Exception:
             pass
     # Fallback programático caso assets/voxcraft.png não exista
@@ -574,21 +599,8 @@ class VoxCraftApp(ctk.CTk):
         self._tab_buttons: dict[str, ctk.CTkButton] = {}
         self._active_tab_key: str = "tab_pitch"
 
-        # Pool compartilhado de fontes (evita 120+ objetos Font no Tkinter e acelera redesenhos)
-        self._fonts = {
-            "xs": ctk.CTkFont(size=11),
-            "xs_b": ctk.CTkFont(size=11, weight="bold"),
-            "sm": ctk.CTkFont(size=12),
-            "sm_b": ctk.CTkFont(size=12, weight="bold"),
-            "md": ctk.CTkFont(size=13),
-            "md_b": ctk.CTkFont(size=13, weight="bold"),
-            "lg_b": ctk.CTkFont(size=14, weight="bold"),
-            "h3_b": ctk.CTkFont(size=15, weight="bold"),
-            "h2_b": ctk.CTkFont(size=17, weight="bold"),
-            "h1_b": ctk.CTkFont(size=18, weight="bold"),
-            "brand": ctk.CTkFont(size=19, weight="bold"),
-            "splash": ctk.CTkFont(size=22, weight="bold"),
-        }
+        # Pool compartilhado de fontes (mesma tipografia da preview interativa: Plus Jakarta Sans + JetBrains Mono)
+        self._fonts, self._ui_font_family, self._mono_font_family = self._init_app_fonts()
 
         # Cache de estado da UI e controle assíncrono de áudio (evita congelamentos/tela branca)
         self._audio_op_seq = 0
@@ -607,12 +619,13 @@ class VoxCraftApp(ctk.CTk):
         self._last_ui_hidden = False
         self._eq_redraw_job = None
         self._last_eq_sig = None
+        self._status_role = "text_muted"
 
         th = self._c()
         # Abre imediatamente em modo Tela de Carregamento (janela única, 60 FPS suave, sem travar)
         self.title(f"VoxCraft Studio — {self._t('loading')}")
         self.configure(fg_color=th["window_bg"])
-        sw_w, sw_h = 480, 235
+        sw_w, sw_h = 490, 245
         scr_w = self.winfo_screenwidth()
         scr_h = self.winfo_screenheight()
         self.geometry(f"{sw_w}x{sw_h}+{(scr_w - sw_w) // 2}+{(scr_h - sw_h) // 2}")
@@ -657,7 +670,66 @@ class VoxCraftApp(ctk.CTk):
         self._theme_hooks.append((widget, fn))
         return widget
 
-    def _card(self, parent, role: str = "card", **kw) -> ctk.CTkFrame:
+    def _init_app_fonts(self) -> tuple[dict[str, ctk.CTkFont], str, str]:
+        try:
+            avail = set(tkfont.families(self))
+        except Exception:
+            avail = set()
+
+        if "Plus Jakarta Sans" in avail:
+            ui_reg = "Plus Jakarta Sans"
+        elif sys.platform == "win32" and "Segoe UI" in avail:
+            ui_reg = "Segoe UI"
+        elif "DejaVu Sans" in avail:
+            ui_reg = "DejaVu Sans"
+        else:
+            ui_reg = "TkDefaultFont"
+
+        ui_med = "Plus Jakarta Sans Medium" if "Plus Jakarta Sans Medium" in avail else ui_reg
+        if "Plus Jakarta Sans SemiBold" in avail:
+            ui_semi, ui_semi_wt = "Plus Jakarta Sans SemiBold", "normal"
+        else:
+            ui_semi, ui_semi_wt = ui_reg, "bold"
+
+        if "JetBrains Mono" in avail:
+            mono_reg = "JetBrains Mono"
+        elif sys.platform == "win32" and "Consolas" in avail:
+            mono_reg = "Consolas"
+        elif "DejaVu Sans Mono" in avail:
+            mono_reg = "DejaVu Sans Mono"
+        else:
+            mono_reg = "TkFixedFont"
+
+        if "JetBrains Mono SemiBold" in avail:
+            mono_semi, mono_semi_wt = "JetBrains Mono SemiBold", "normal"
+        else:
+            mono_semi, mono_semi_wt = mono_reg, "bold"
+
+        fonts = {
+            "xs": ctk.CTkFont(family=ui_reg, size=11),
+            "xs_m": ctk.CTkFont(family=ui_med, size=11),
+            "xs_b": ctk.CTkFont(family=ui_semi, size=11, weight=ui_semi_wt),
+            "sm": ctk.CTkFont(family=ui_reg, size=12),
+            "sm_m": ctk.CTkFont(family=ui_med, size=12),
+            "sm_b": ctk.CTkFont(family=ui_semi, size=12, weight=ui_semi_wt),
+            "md": ctk.CTkFont(family=ui_reg, size=13),
+            "md_m": ctk.CTkFont(family=ui_med, size=13),
+            "md_b": ctk.CTkFont(family=ui_semi, size=13, weight=ui_semi_wt),
+            "lg_b": ctk.CTkFont(family=ui_reg, size=14, weight="bold"),
+            "h3_b": ctk.CTkFont(family=ui_reg, size=15, weight="bold"),
+            "h2_b": ctk.CTkFont(family=ui_reg, size=17, weight="bold"),
+            "h1_b": ctk.CTkFont(family=ui_reg, size=18, weight="bold"),
+            "brand": ctk.CTkFont(family=ui_reg, size=18, weight="bold"),
+            "splash": ctk.CTkFont(family=ui_reg, size=22, weight="bold"),
+            "mono_xs": ctk.CTkFont(family=mono_reg, size=10),
+            "mono_xs_b": ctk.CTkFont(family=mono_semi, size=10, weight=mono_semi_wt),
+            "mono_sm": ctk.CTkFont(family=mono_reg, size=11),
+            "mono_sm_b": ctk.CTkFont(family=mono_semi, size=11, weight=mono_semi_wt),
+            "mono_md_b": ctk.CTkFont(family=mono_semi, size=12, weight=mono_semi_wt),
+        }
+        return fonts, ui_reg, mono_reg
+
+    def _card(self, parent, role: str = "card", bordered: bool = True, **kw) -> ctk.CTkFrame:
         th = self._c()
         if role == "panel":
             w = ctk.CTkFrame(parent, fg_color=th["panel_bg"], border_width=1, border_color=th["panel_border"], **kw)
@@ -668,11 +740,30 @@ class VoxCraftApp(ctk.CTk):
                 ),
             )
         elif role == "subcard":
-            w = ctk.CTkFrame(parent, fg_color=th["subcard_bg"], **kw)
-            self._reg_theme(w, lambda t, wd=w: wd.configure(fg_color=t["subcard_bg"], bg_color="transparent"))
+            bw = 1 if bordered else 0
+            w = ctk.CTkFrame(
+                parent,
+                fg_color=th["subcard_bg"],
+                border_width=bw,
+                border_color=th["border_soft"],
+                **kw,
+            )
+            self._reg_theme(
+                w,
+                lambda t, wd=w, has_b=bordered: wd.configure(
+                    fg_color=t["subcard_bg"],
+                    border_color=t["border_soft"] if has_b else t["subcard_bg"],
+                    bg_color="transparent",
+                ),
+            )
         elif role == "tabbar":
-            w = ctk.CTkFrame(parent, fg_color=th["tab_bg"], **kw)
-            self._reg_theme(w, lambda t, wd=w: wd.configure(fg_color=t["tab_bg"], bg_color="transparent"))
+            w = ctk.CTkFrame(parent, fg_color=th["tab_bg"], border_width=1, border_color=th["panel_border"], **kw)
+            self._reg_theme(
+                w,
+                lambda t, wd=w: wd.configure(
+                    fg_color=t["tab_bg"], border_color=t["panel_border"], bg_color="transparent"
+                ),
+            )
         else:
             w = ctk.CTkFrame(parent, fg_color=th["card_bg"], border_width=1, border_color=th["card_border"], **kw)
             self._reg_theme(
@@ -755,7 +846,7 @@ class VoxCraftApp(ctk.CTk):
         self._reg_theme(w, lambda t, wd=w, cr=color_role: wd.configure(text_color=t[cr]))
         return w
 
-    def _switch(self, parent, key_or_text: str, variable, command, font_key: str | None = None, is_key: bool = True, progress_color: str | None = None) -> ctk.CTkSwitch:
+    def _switch(self, parent, key_or_text: str, variable, command, font_key: str | None = "sm_m", is_key: bool = True, progress_color: str | None = None) -> ctk.CTkSwitch:
         th = self._c()
         text = self._t(key_or_text) if is_key else key_or_text
         kwargs = {
@@ -766,6 +857,8 @@ class VoxCraftApp(ctk.CTk):
             "button_color": th["switch_knob"],
             "button_hover_color": th["switch_knob_hover"],
             "text_color": th["text_primary"],
+            "switch_width": 40,
+            "switch_height": 20,
             "command": command,
         }
         if font_key is not None:
@@ -804,21 +897,22 @@ class VoxCraftApp(ctk.CTk):
         is_key: bool = True,
         bordered: bool = True,
         hover_override: str | None = None,
-        font_key: str | None = None,
+        hover_role: str | None = None,
+        font_key: str = "sm_b",
         **kw,
     ) -> ctk.CTkButton:
         th = self._c()
         text = self._t(key_or_text) if is_key else key_or_text
-        if font_key is not None:
-            kw["font"] = self._fonts[font_key]
+        kw["font"] = self._fonts[font_key]
         if bordered:
             kw.setdefault("border_width", 1)
             kw["border_color"] = th["control_border"]
+        init_hover = th[hover_role] if hover_role else (hover_override or th["control_hover"])
         w = ctk.CTkButton(
             parent,
             text=text,
             fg_color=th["control_bg"],
-            hover_color=hover_override or th["control_hover"],
+            hover_color=init_hover,
             text_color=th["text_primary"],
             command=command,
             **kw,
@@ -828,9 +922,9 @@ class VoxCraftApp(ctk.CTk):
         if bordered:
             self._reg_theme(
                 w,
-                lambda t, wd=w, hv=hover_override: wd.configure(
+                lambda t, wd=w, hv=hover_override, hr=hover_role: wd.configure(
                     fg_color=t["control_bg"],
-                    hover_color=hv or t["control_hover"],
+                    hover_color=t[hr] if hr else (hv or t["control_hover"]),
                     text_color=t["text_primary"],
                     border_color=t["control_border"],
                 ),
@@ -838,9 +932,9 @@ class VoxCraftApp(ctk.CTk):
         else:
             self._reg_theme(
                 w,
-                lambda t, wd=w, hv=hover_override: wd.configure(
+                lambda t, wd=w, hv=hover_override, hr=hover_role: wd.configure(
                     fg_color=t["control_bg"],
-                    hover_color=hv or t["control_hover"],
+                    hover_color=t[hr] if hr else (hv or t["control_hover"]),
                     text_color=t["text_primary"],
                 ),
             )
@@ -848,6 +942,8 @@ class VoxCraftApp(ctk.CTk):
 
     def _optmenu(self, parent, variable, values, command, **kw) -> ctk.CTkOptionMenu:
         th = self._c()
+        kw.setdefault("font", self._fonts["sm_m"])
+        kw.setdefault("dropdown_font", self._fonts["sm"])
         w = ctk.CTkOptionMenu(
             parent,
             variable=variable,
@@ -945,15 +1041,15 @@ class VoxCraftApp(ctk.CTk):
         ).pack(anchor="w")
         ctk.CTkLabel(
             titles,
-            text=f"v{local_id['version']}",
-            font=self._fonts["xs"],
+            text=f"v{local_id['version']} · DSP Studio",
+            font=self._fonts["mono_sm"],
             text_color=th["text_subtle"],
         ).pack(anchor="w")
 
         self._splash_lbl = ctk.CTkLabel(
             self._splash_frame,
             text=self._t("loading"),
-            font=self._fonts["sm"],
+            font=self._fonts["sm_m"],
             text_color=th["text_body"],
         )
         self._splash_lbl.pack(pady=(14, 10))
@@ -972,18 +1068,19 @@ class VoxCraftApp(ctk.CTk):
             self._splash_disp += (self._splash_target - self._splash_disp) * 0.14
             self._splash_phase = (self._splash_phase + 0.06) % 1.0
             c = self._splash_canvas
+            th = self._c()
             w = 360
             fill_w = max(12, min(w, int(w * self._splash_disp)))
             c.delete("all")
-            c.create_rectangle(0, 0, fill_w, 10, fill="#2563eb", width=0)
-            c.create_rectangle(0, 0, max(8, fill_w - 2), 6, fill="#38bdf8", width=0)
+            c.create_rectangle(0, 0, fill_w, 10, fill=th["accent_deep"], width=0)
+            c.create_rectangle(0, 0, max(8, fill_w - 2), 6, fill=th["accent"], width=0)
             # Brilho suave percorrendo a barra durante o carregamento
             if fill_w > 48:
                 hx = int(self._splash_phase * (fill_w + 50)) - 40
                 x0 = max(0, hx)
                 x1 = min(fill_w, hx + 44)
                 if x1 > x0:
-                    c.create_rectangle(x0, 0, x1, 10, fill="#7dd3fc", width=0)
+                    c.create_rectangle(x0, 0, x1, 10, fill=th["accent_hover"], width=0)
         except Exception:
             return
         self._splash_anim_job = self.after(16, self._animate_splash)
@@ -1081,13 +1178,18 @@ class VoxCraftApp(ctk.CTk):
             self._restore_saved_ui_prefs()
             self._refresh_devices(reinit_backend=False, initial_load=True)
 
-            saved_preset = self._preset_to_internal(str(self.app_config.get("last_preset", "Normal")))
-            if saved_preset in self.builtin_presets:
+            saved_preset_raw = str(self.app_config.get("last_preset", "Normal"))
+            saved_is_user = bool(self.app_config.get("last_preset_is_user", False))
+            saved_preset = self._preset_to_internal(saved_preset_raw)
+            if saved_is_user and saved_preset_raw in self.user_presets:
+                self.preset_var.set(f"★ {saved_preset_raw}")
+                self._apply_preset(saved_preset_raw, save_cfg=False, preserve_bypass=True, prefer_user=True)
+            elif saved_preset in self.builtin_presets:
                 self.preset_var.set(self._preset_to_display(saved_preset))
                 self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True)
             elif saved_preset in self.user_presets:
                 self.preset_var.set(f"★ {saved_preset}")
-                self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True)
+                self._apply_preset(saved_preset, save_cfg=False, preserve_bypass=True, prefer_user=True)
             else:
                 self.preset_var.set(self._preset_to_display("Normal"))
                 self._apply_preset("Normal", save_cfg=False, preserve_bypass=True)
@@ -1103,10 +1205,7 @@ class VoxCraftApp(ctk.CTk):
                     except Exception:
                         pass
                 self._save_config()
-                self.status_lbl.configure(
-                    text=self._t("restored_msg"),
-                    text_color="#10b981",
-                )
+                self._set_status(self._t("restored_msg"), "live")
                 if was_running_upd:
                     self.after(450, self._start_audio)
         except Exception as exc:
@@ -1136,13 +1235,13 @@ class VoxCraftApp(ctk.CTk):
 
         self.title("VoxCraft Studio")
         self.configure(fg_color=self._c()["window_bg"])
-        w, h = 1220, 780
+        w, h = 1260, 810
         scr_w = self.winfo_screenwidth()
         scr_h = self.winfo_screenheight()
         x = max(0, (scr_w - w) // 2)
         y = max(0, (scr_h - h) // 2)
         self.resizable(True, True)
-        self.minsize(1060, 680)
+        self.minsize(1080, 700)
         self.geometry(f"{w}x{h}+{x}+{y}")
 
         self.main_container.pack(fill="both", expand=True)
@@ -1227,10 +1326,7 @@ class VoxCraftApp(ctk.CTk):
             _post_ui(self._toggle_audio)
 
         def on_toggle_bypass(icon, item):
-            def _flip():
-                self.bypass_var.set(not self.bypass_var.get())
-                self._on_param_change()
-            _post_ui(_flip)
+            _post_ui(lambda: self._set_bypass_state(not bool(self.bypass_var.get())))
 
         def on_quit(icon, item):
             self._is_quitting = True
@@ -1443,7 +1539,7 @@ class VoxCraftApp(ctk.CTk):
         title_lbl.pack(side="left")
 
         local_id = self._get_local_build_identity()
-        ver_lbl = self._lbl(left_box, f"v{local_id['version']}", font_key="xs", color_role="text_subtle", is_key=False)
+        ver_lbl = self._lbl(left_box, f"v{local_id['version']}", font_key="mono_xs", color_role="text_subtle", is_key=False)
         ver_lbl.pack(side="left", padx=(6, 0), pady=(1, 0))
 
         # Botões estilo Windows à direita: Minimizar, Maximizar/Restaurar, Fechar
@@ -1579,12 +1675,12 @@ class VoxCraftApp(ctk.CTk):
                     return
                 cur_w = max(1, self.winfo_width())
                 ratio = max(0.15, min(0.85, (event.x_root - self.winfo_x()) / float(cur_w)))
-                rw, rh = 1220, 780
+                rw, rh = 1260, 810
                 if self._restore_geometry:
                     try:
                         size_part = self._restore_geometry.split("+", 1)[0]
                         rw_s, rh_s = size_part.split("x", 1)
-                        rw, rh = max(1060, int(rw_s)), max(680, int(rh_s))
+                        rw, rh = max(1080, int(rw_s)), max(700, int(rh_s))
                     except Exception:
                         pass
                 self._is_maximized = False
@@ -1614,7 +1710,7 @@ class VoxCraftApp(ctk.CTk):
             text="◢",
             bg=th["window_bg"],
             fg=th["text_subtle"],
-            font=("TkDefaultFont", 8),
+            font=(self._mono_font_family, 8),
             cursor="bottom_right_corner",
             bd=0,
             padx=2,
@@ -1639,8 +1735,8 @@ class VoxCraftApp(ctk.CTk):
             if self._resize_origin is None or self._is_maximized:
                 return
             sx, sy, sw, sh, wx, wy = self._resize_origin
-            nw = max(1060, sw + (event.x_root - sx))
-            nh = max(680, sh + (event.y_root - sy))
+            nw = max(1080, sw + (event.x_root - sx))
+            nh = max(700, sh + (event.y_root - sy))
             self.geometry(f"{nw}x{nh}+{wx}+{wy}")
 
         def _end_resize(_event):
@@ -1651,8 +1747,54 @@ class VoxCraftApp(ctk.CTk):
         grip.bind("<ButtonRelease-1>", _end_resize)
 
     # ------------------------------------------------------------------ #
-    # Construção da Interface
+    # Construção da Interface (Inspirada na Preview Interativa)
     # ------------------------------------------------------------------ #
+    def _style_bypass_btn(self):
+        btn = getattr(self, "bypass_btn", None)
+        if btn is None:
+            return
+        th = self._c()
+        if self.bypass_var.get():
+            btn.configure(
+                fg_color=th["warn"],
+                hover_color=th["warn"],
+                border_color=th["warn"],
+                text_color="#111827",
+            )
+        else:
+            btn.configure(
+                fg_color=th["control_bg"],
+                hover_color=th["control_hover"],
+                border_color=th["control_border"],
+                text_color=th["text_primary"],
+            )
+
+    def _toggle_bypass_btn(self):
+        self.bypass_var.set(not bool(self.bypass_var.get()))
+        self._style_bypass_btn()
+        self._on_param_change()
+
+    def _style_power_btn(self, running: bool | None = None):
+        btn = getattr(self, "power_btn", None)
+        if btn is None:
+            return
+        th = self._c()
+        is_run = self.router.running if running is None else bool(running)
+        if is_run:
+            btn.configure(
+                text=self._t("stop_audio"),
+                fg_color=th["danger"],
+                hover_color=th["danger_hover"],
+                text_color="#ffffff",
+            )
+        else:
+            btn.configure(
+                text=self._t("start_audio"),
+                fg_color=th["accent"],
+                hover_color=th["accent_hover"],
+                text_color=th["accent_text"],
+            )
+
     def _build_layout(self):
         root = getattr(self, "main_container", self)
         th = self._c()
@@ -1671,62 +1813,73 @@ class VoxCraftApp(ctk.CTk):
         self._tab_buttons = {}
         self._active_tab_key = "tab_pitch"
 
-        # Barra Superior
-        topbar = self._card(root, role="panel", height=62, corner_radius=14)
+        # Barra Superior (.workbench-top)
+        topbar = self._card(root, role="panel", height=64, corner_radius=14)
         topbar.pack(fill="x", padx=14, pady=(10 if IS_LINUX else 12, 8))
         topbar.pack_propagate(False)
 
         title_box = ctk.CTkFrame(topbar, fg_color="transparent")
         title_box.pack(side="left", padx=(16, 14))
-        self._lbl(title_box, "VoxCraft Studio", font_key="brand", color_role="accent", is_key=False).pack(anchor="w")
+        pil_ico = _load_or_create_pil_icon()
+        if pil_ico is not None:
+            try:
+                self._topbar_logo_img = ctk.CTkImage(light_image=pil_ico, dark_image=pil_ico, size=(24, 24))
+                ctk.CTkLabel(title_box, image=self._topbar_logo_img, text="").pack(side="left", padx=(0, 9))
+            except Exception:
+                pass
+        self._lbl(title_box, "VoxCraft Studio", font_key="brand", color_role="accent", is_key=False).pack(side="left")
+        local_id = self._get_local_build_identity()
+        self._lbl(
+            title_box, f"v{local_id['version']}", font_key="mono_xs", color_role="text_subtle", is_key=False
+        ).pack(side="left", padx=(7, 0), pady=(3, 0))
 
-        # Controles de Preset no Topo
+        # Controles de Preset no Topo (.wb-preset-wrap)
         preset_box = ctk.CTkFrame(topbar, fg_color="transparent")
         preset_box.pack(side="left", padx=6)
-        self._lbl(preset_box, "preset", font_key="sm", color_role="text_muted").pack(side="left", padx=(0, 8))
+        self._lbl(preset_box, "preset", font_key="sm_m", color_role="text_muted").pack(side="left", padx=(0, 8))
 
         self.preset_var = ctk.StringVar(value=self._preset_to_display("Normal"))
         self.preset_menu = self._optmenu(
             preset_box,
             variable=self.preset_var,
             values=self._all_preset_names(),
-            width=210,
-            height=32,
-            corner_radius=8,
+            width=220,
+            height=34,
+            corner_radius=9,
             command=self._on_preset_selected,
         )
-        self.preset_menu.pack(side="left", padx=3)
+        self.preset_menu.pack(side="left", padx=(0, 4))
 
         self._btn(
             preset_box,
             "save",
             self._save_custom_preset,
-            hover_override="#2563eb",
-            width=66,
-            height=32,
-            corner_radius=8,
+            hover_role="accent_deep",
+            width=70,
+            height=34,
+            corner_radius=9,
         ).pack(side="left", padx=3)
         self._btn(
             preset_box,
             "delete",
             self._delete_custom_preset,
-            hover_override="#dc2626",
-            width=64,
-            height=32,
-            corner_radius=8,
+            hover_role="danger",
+            width=70,
+            height=34,
+            corner_radius=9,
         ).pack(side="left", padx=3)
 
-        # Botões da Direita
+        # Botões da Direita (.wb-actions)
         right_top = ctk.CTkFrame(topbar, fg_color="transparent")
-        right_top.pack(side="right", padx=12)
+        right_top.pack(side="right", padx=14)
 
         self.settings_btn = self._btn(
             right_top,
             "settings",
             self._open_settings_dialog,
-            width=102,
-            height=32,
-            corner_radius=8,
+            width=106,
+            height=34,
+            corner_radius=9,
         )
         self.settings_btn.pack(side="left", padx=3)
 
@@ -1734,10 +1887,10 @@ class VoxCraftApp(ctk.CTk):
             right_top,
             "update",
             self._start_app_update,
-            hover_override="#2563eb",
-            width=82,
-            height=32,
-            corner_radius=8,
+            hover_role="accent_deep",
+            width=88,
+            height=34,
+            corner_radius=9,
         )
         self.update_btn.pack(side="left", padx=3)
 
@@ -1745,37 +1898,46 @@ class VoxCraftApp(ctk.CTk):
             right_top,
             "discord",
             self._open_discord_guide,
-            width=72,
-            height=32,
-            corner_radius=8,
+            width=78,
+            height=34,
+            corner_radius=9,
         ).pack(side="left", padx=3)
 
         self.bypass_var = ctk.BooleanVar(value=False)
-        self.bypass_btn = self._switch(
+        self.bypass_btn = ctk.CTkButton(
             right_top,
-            "original_voice",
-            self.bypass_var,
-            self._on_param_change,
-            progress_color="#f59e0b",
+            text=self._t("original_voice"),
+            width=118,
+            height=34,
+            corner_radius=9,
+            border_width=1,
+            font=self._fonts["sm_b"],
+            fg_color=th["control_bg"],
+            hover_color=th["control_hover"],
+            border_color=th["control_border"],
+            text_color=th["text_primary"],
+            command=self._toggle_bypass_btn,
         )
-        self.bypass_btn.pack(side="left", padx=(8, 8))
+        self.bypass_btn.pack(side="left", padx=(6, 8))
+        self.bypass_var.trace_add("write", lambda *_: self._style_bypass_btn())
+        self._reg_theme(self.bypass_btn, lambda _t: self._style_bypass_btn())
+        self._reg_i18n(lambda: self.bypass_btn.configure(text=self._t("original_voice")))
 
         self.power_btn = ctk.CTkButton(
             right_top,
             text=self._t("start_audio"),
-            width=128,
+            width=138,
             height=36,
-            corner_radius=9,
+            corner_radius=10,
             font=self._fonts["md_b"],
-            fg_color="#059669",
-            hover_color="#10b981",
-            text_color="#ffffff",
+            fg_color=th["accent"],
+            hover_color=th["accent_hover"],
+            text_color=th["accent_text"],
             command=self._toggle_audio,
         )
         self.power_btn.pack(side="left", padx=2)
-        self._reg_i18n(
-            lambda: self.power_btn.configure(text=self._t("stop_audio" if self.router.running else "start_audio"))
-        )
+        self._reg_theme(self.power_btn, lambda _t: self._style_power_btn())
+        self._reg_i18n(lambda: self._style_power_btn())
 
         # Corpo Principal: Sidebar (Esquerda) + Workbench (Direita)
         body = ctk.CTkFrame(root, fg_color="transparent")
@@ -1789,41 +1951,41 @@ class VoxCraftApp(ctk.CTk):
 
     def _build_sidebar(self, parent):
         th = self._c()
-        side = self._scroll(parent, role="panel", width=316, corner_radius=14)
+        side = self._scroll(parent, role="panel", width=332, corner_radius=14)
         side.pack(side="left", fill="y", padx=(0, 10))
 
         # Card: Roteamento
         route_card = self._card(side, role="card", corner_radius=12)
         route_card.pack(fill="x", padx=8, pady=(8, 6))
 
-        self._lbl(route_card, "audio_section", font_key="lg_b", color_role="text_primary").pack(
-            anchor="w", padx=12, pady=(10, 6)
+        self._lbl(route_card, "audio_section", font_key="md_b", color_role="text_primary").pack(
+            anchor="w", padx=12, pady=(12, 8)
         )
-        self._lbl(route_card, "microphone", font_key="sm", color_role="text_muted").pack(anchor="w", padx=12)
+        self._lbl(route_card, "microphone", font_key="xs_m", color_role="text_muted").pack(anchor="w", padx=12)
         self.in_dev_var = ctk.StringVar()
         self.in_dev_menu = self._optmenu(
             route_card,
             variable=self.in_dev_var,
             values=[""],
-            width=276,
-            height=30,
+            width=288,
+            height=32,
             corner_radius=8,
             command=self._on_device_changed,
         )
-        self.in_dev_menu.pack(padx=12, pady=(3, 8))
+        self.in_dev_menu.pack(padx=12, pady=(4, 8))
 
-        self._lbl(route_card, "output", font_key="sm", color_role="text_muted").pack(anchor="w", padx=12)
+        self._lbl(route_card, "output", font_key="xs_m", color_role="text_muted").pack(anchor="w", padx=12)
         self.out_dev_var = ctk.StringVar()
         self.out_dev_menu = self._optmenu(
             route_card,
             variable=self.out_dev_var,
             values=[""],
-            width=276,
-            height=30,
+            width=288,
+            height=32,
             corner_radius=8,
             command=self._on_device_changed,
         )
-        self.out_dev_menu.pack(padx=12, pady=(3, 8))
+        self.out_dev_menu.pack(padx=12, pady=(4, 8))
 
         self.monitor_var = ctk.BooleanVar(value=False)
         self._switch(route_card, "monitor_voice", self.monitor_var, self._on_routing_pref_changed).pack(
@@ -1834,23 +1996,23 @@ class VoxCraftApp(ctk.CTk):
             route_card,
             variable=self.mon_dev_var,
             values=[""],
-            width=276,
-            height=30,
+            width=288,
+            height=32,
             corner_radius=8,
             command=self._on_device_changed,
         )
-        self.mon_dev_menu.pack(padx=12, pady=(3, 8))
+        self.mon_dev_menu.pack(padx=12, pady=(4, 8))
 
         lat_row = ctk.CTkFrame(route_card, fg_color="transparent")
         lat_row.pack(fill="x", padx=12, pady=(2, 8))
-        self._lbl(lat_row, "latency", font_key="sm", color_role="text_muted").pack(side="left")
+        self._lbl(lat_row, "latency", font_key="xs_m", color_role="text_muted").pack(side="left")
         self.latency_var = ctk.StringVar(value=self._t("lat_low"))
         self.latency_menu = self._optmenu(
             lat_row,
             variable=self.latency_var,
             values=[self._t("lat_ultra"), self._t("lat_low"), self._t("lat_stable")],
-            width=145,
-            height=28,
+            width=152,
+            height=30,
             corner_radius=8,
             command=lambda _: self._on_routing_pref_changed(),
         )
@@ -1865,18 +2027,28 @@ class VoxCraftApp(ctk.CTk):
             route_card,
             "refresh_devices",
             lambda: self._refresh_devices(reinit_backend=True),
-            height=30,
+            height=32,
             corner_radius=8,
         ).pack(fill="x", padx=12, pady=(2, 8))
 
+        status_box = self._card(route_card, role="subcard", bordered=True, corner_radius=8)
+        status_box.pack(fill="x", padx=12, pady=(0, 12))
         self.status_lbl = ctk.CTkLabel(
-            route_card, text=self._t("stopped"), font=self._fonts["xs"], text_color=th["text_muted"], wraplength=272
+            status_box,
+            text=self._t("stopped"),
+            font=self._fonts["mono_xs"],
+            text_color=th["text_muted"],
+            wraplength=266,
+            justify="left",
+            anchor="w",
         )
-        self.status_lbl.pack(anchor="w", padx=12, pady=(0, 10))
-        self._reg_i18n(lambda: None if self.router.running else self.status_lbl.configure(text=self._t("stopped")))
+        self.status_lbl.pack(fill="x", padx=10, pady=7)
+        self._reg_i18n(lambda: None if self.router.running else self._set_status(self._t("stopped"), "text_muted"))
         self._reg_theme(
             self.status_lbl,
-            lambda t: None if self.router.running else self.status_lbl.configure(text_color=t["text_muted"]),
+            lambda t: self.status_lbl.configure(
+                text_color=t["live"] if self.router.running else t.get(self._status_role, t["text_muted"])
+            ),
         )
 
         # Card: Atalho Global
@@ -1884,7 +2056,7 @@ class VoxCraftApp(ctk.CTk):
         hk_card.pack(fill="x", padx=8, pady=6)
 
         self._lbl(hk_card, "hotkey_section", font_key="md_b", color_role="text_primary").pack(
-            anchor="w", padx=12, pady=(10, 6)
+            anchor="w", padx=12, pady=(12, 6)
         )
 
         self.hotkey_en_var = ctk.BooleanVar(value=True)
@@ -1894,14 +2066,14 @@ class VoxCraftApp(ctk.CTk):
 
         hk_row = ctk.CTkFrame(hk_card, fg_color="transparent")
         hk_row.pack(fill="x", padx=12, pady=(0, 6))
-        self._lbl(hk_row, "key_label", font_key="sm", color_role="text_muted").pack(side="left")
+        self._lbl(hk_row, "key_label", font_key="xs_m", color_role="text_muted").pack(side="left")
         self.hotkey_btn = self._btn(
             hk_row,
             "F9",
             self._toggle_hotkey_capture,
             is_key=False,
-            font_key="sm_b",
-            height=28,
+            font_key="mono_md_b",
+            height=32,
             corner_radius=8,
         )
         self.hotkey_btn.pack(side="left", fill="x", expand=True, padx=(10, 0))
@@ -1914,49 +2086,53 @@ class VoxCraftApp(ctk.CTk):
         self.hotkey_hint_lbl = ctk.CTkLabel(
             hk_card,
             text="",
-            font=self._fonts["xs"],
+            font=self._fonts["mono_xs"],
             text_color=th["accent"],
-            wraplength=265,
+            wraplength=280,
             justify="left",
         )
-        self.hotkey_hint_lbl.pack(anchor="w", padx=12, pady=(2, 10))
+        self.hotkey_hint_lbl.pack(anchor="w", padx=12, pady=(2, 12))
 
         # Card: Níveis & Osciloscópio
         meter_card = self._card(side, role="card", corner_radius=12)
         meter_card.pack(fill="x", padx=8, pady=6)
 
         self._lbl(meter_card, "levels_section", font_key="md_b", color_role="text_primary").pack(
-            anchor="w", padx=12, pady=(10, 6)
+            anchor="w", padx=12, pady=(12, 6)
         )
 
         row_in = ctk.CTkFrame(meter_card, fg_color="transparent")
         row_in.pack(fill="x", padx=12)
-        self._lbl(row_in, "input_lbl", font_key="xs", color_role="text_muted", width=55, anchor="w").pack(side="left")
-        self.in_bar = ctk.CTkProgressBar(row_in, height=8, fg_color=th["track_bg"], progress_color=th["accent"])
+        self._lbl(row_in, "input_lbl", font_key="xs_m", color_role="text_muted", width=55, anchor="w").pack(side="left")
+        self.in_bar = ctk.CTkProgressBar(row_in, height=6, fg_color=th["track_bg"], progress_color=th["accent"])
         self.in_bar.set(0)
         self.in_bar.pack(side="left", fill="x", expand=True, padx=6)
         self._reg_theme(self.in_bar, lambda t: self.in_bar.configure(fg_color=t["track_bg"], progress_color=t["accent"]))
 
         row_out = ctk.CTkFrame(meter_card, fg_color="transparent")
         row_out.pack(fill="x", padx=12, pady=(6, 4))
-        self._lbl(row_out, "output_lbl", font_key="xs", color_role="text_muted", width=55, anchor="w").pack(side="left")
-        self.out_bar = ctk.CTkProgressBar(row_out, height=8, fg_color=th["track_bg"], progress_color="#10b981")
+        self._lbl(row_out, "output_lbl", font_key="xs_m", color_role="text_muted", width=55, anchor="w").pack(side="left")
+        self.out_bar = ctk.CTkProgressBar(row_out, height=6, fg_color=th["track_bg"], progress_color=th["live"])
         self.out_bar.set(0)
         self.out_bar.pack(side="left", fill="x", expand=True, padx=6)
-        self._reg_theme(self.out_bar, lambda t: self.out_bar.configure(fg_color=t["track_bg"]))
+        self._reg_theme(self.out_bar, lambda t: self.out_bar.configure(fg_color=t["track_bg"], progress_color=t["live"]))
 
         self.gate_led = ctk.CTkLabel(
-            meter_card, text=self._t("gate_open"), font=self._fonts["xs"], text_color="#10b981"
+            meter_card, text=self._t("gate_open"), font=self._fonts["mono_xs_b"], text_color=th["live"]
         )
-        self.gate_led.pack(anchor="w", padx=12, pady=(2, 4))
+        self.gate_led.pack(anchor="w", padx=12, pady=(2, 6))
         self._reg_i18n(
             lambda: self.gate_led.configure(text=self._t("gate_open" if self._last_gate_open is not False else "gate_closed"))
         )
+        self._reg_theme(
+            self.gate_led,
+            lambda t: self.gate_led.configure(text_color=t["live"] if self._last_gate_open is not False else t["warn"]),
+        )
 
         self.wave_canvas = tk.Canvas(
-            meter_card, height=64, bg=th["canvas_bg"], highlightthickness=1, highlightbackground=th["canvas_border"]
+            meter_card, height=72, bg=th["canvas_bg"], highlightthickness=1, highlightbackground=th["canvas_border"]
         )
-        self.wave_canvas.pack(fill="x", padx=12, pady=(2, 12))
+        self.wave_canvas.pack(fill="x", padx=12, pady=(0, 12))
         self._reg_theme(
             self.wave_canvas,
             lambda t: self.wave_canvas.configure(bg=t["canvas_bg"], highlightbackground=t["canvas_border"]),
@@ -1966,33 +2142,33 @@ class VoxCraftApp(ctk.CTk):
         dyn_card = self._card(side, role="card", corner_radius=12)
         dyn_card.pack(fill="x", padx=8, pady=(6, 10))
         self._lbl(dyn_card, "dynamics_section", font_key="md_b", color_role="text_primary").pack(
-            anchor="w", padx=12, pady=(10, 6)
+            anchor="w", padx=12, pady=(12, 6)
         )
 
-        self.input_gain_var = self._add_slider(dyn_card, "input_gain", -18.0, 24.0, 0.0, "dB")
+        self.input_gain_var = self._add_slider(dyn_card, "input_gain", -18.0, 24.0, 0.0, "dB", boxed=True)
         self.gate_en_var = ctk.BooleanVar(value=False)
         self._switch(dyn_card, "noise_gate", self.gate_en_var, self._on_param_change).pack(
-            anchor="w", padx=12, pady=(6, 0)
+            anchor="w", padx=12, pady=(6, 2)
         )
-        self.gate_thresh_var = self._add_slider(dyn_card, "gate_thresh", -65.0, -15.0, -42.0, "dB")
+        self.gate_thresh_var = self._add_slider(dyn_card, "gate_thresh", -65.0, -15.0, -42.0, "dB", boxed=True)
 
         self.comp_en_var = ctk.BooleanVar(value=True)
         self._switch(dyn_card, "compressor", self.comp_en_var, self._on_param_change).pack(
-            anchor="w", padx=12, pady=(6, 0)
+            anchor="w", padx=12, pady=(6, 2)
         )
-        self.comp_thresh_var = self._add_slider(dyn_card, "comp_thresh", -36.0, -4.0, -18.0, "dB")
-        self.output_gain_var = self._add_slider(dyn_card, "output_vol", -24.0, 24.0, 0.0, "dB")
+        self.comp_thresh_var = self._add_slider(dyn_card, "comp_thresh", -36.0, -4.0, -18.0, "dB", boxed=True)
+        self.output_gain_var = self._add_slider(dyn_card, "output_vol", -24.0, 24.0, 0.0, "dB", boxed=True)
 
     def _build_workbench(self, parent):
         th = self._c()
         shell = self._card(parent, role="panel", corner_radius=14)
         shell.pack(side="left", fill="both", expand=True)
 
-        tab_bar = self._card(shell, role="tabbar", corner_radius=10)
-        tab_bar.pack(fill="x", padx=12, pady=(10, 4))
+        tab_bar = self._card(shell, role="tabbar", corner_radius=12)
+        tab_bar.pack(fill="x", padx=12, pady=(12, 6))
 
         self._tab_content = ctk.CTkFrame(shell, fg_color="transparent")
-        self._tab_content.pack(fill="both", expand=True, padx=4, pady=(0, 6))
+        self._tab_content.pack(fill="both", expand=True, padx=4, pady=(0, 8))
         self._transparent_containers.append(self._tab_content)
 
         specs = [
@@ -2004,15 +2180,16 @@ class VoxCraftApp(ctk.CTk):
             ("tab_mixer", self._build_mixer_tab),
         ]
         for tk_key, builder in specs:
+            is_sel = tk_key == self._active_tab_key
             btn = ctk.CTkButton(
                 tab_bar,
                 text=self._t(tk_key),
-                height=30,
+                height=34,
                 corner_radius=8,
                 font=self._fonts["sm_b"],
-                fg_color=th["tab_sel"] if tk_key == self._active_tab_key else th["tab_bg"],
-                hover_color=th["tab_sel_hover"] if tk_key == self._active_tab_key else th["tab_unsel_hover"],
-                text_color=th["seg_text"],
+                fg_color=th["tab_sel"] if is_sel else "transparent",
+                hover_color=th["tab_sel_hover"] if is_sel else th["tab_unsel_hover"],
+                text_color=th["seg_active_text"] if is_sel else th["text_muted"],
                 command=lambda k=tk_key: self._select_tab(k),
             )
             btn.pack(side="left", fill="x", expand=True, padx=3, pady=4)
@@ -2034,9 +2211,9 @@ class VoxCraftApp(ctk.CTk):
         th = self._c()
         is_sel = tab_key == self._active_tab_key
         btn.configure(
-            fg_color=th["tab_sel"] if is_sel else th["tab_bg"],
+            fg_color=th["tab_sel"] if is_sel else "transparent",
             hover_color=th["tab_sel_hover"] if is_sel else th["tab_unsel_hover"],
-            text_color=th["seg_text"],
+            text_color=th["seg_active_text"] if is_sel else th["text_muted"],
         )
 
     def _select_tab(self, tab_key: str):
@@ -2051,6 +2228,13 @@ class VoxCraftApp(ctk.CTk):
         if tab_key == "tab_eq":
             self._schedule_eq_redraw()
 
+    def _slider_grid(self, parent, cols: int = 2) -> ctk.CTkFrame:
+        grid = ctk.CTkFrame(parent, fg_color="transparent")
+        grid.pack(fill="x", padx=10, pady=(2, 8))
+        for c in range(cols):
+            grid.columnconfigure(c, weight=1, uniform="sgrid")
+        return grid
+
     def _build_pitch_tab(self, tab):
         scroll = self._scroll(tab)
         scroll.pack(fill="both", expand=True)
@@ -2060,16 +2244,17 @@ class VoxCraftApp(ctk.CTk):
         card1.pack(fill="x", padx=10, pady=8)
 
         hdr1 = ctk.CTkFrame(card1, fg_color="transparent")
-        hdr1.pack(fill="x", padx=16, pady=(12, 8))
+        hdr1.pack(fill="x", padx=16, pady=(14, 6))
         self.pitch_en_var = ctk.BooleanVar(value=False)
         self._switch(hdr1, "pitch_shift", self.pitch_en_var, self._on_param_change, font_key="h3_b").pack(side="left")
 
-        self.pitch_st_var = self._add_slider(card1, "semitones", -12.0, 12.0, 0.0, "st", step=0.1)
-        self.pitch_cents_var = self._add_slider(card1, "fine_tune", -100.0, 100.0, 0.0, "ct", step=1.0)
-        self.pitch_mix_var = self._add_slider(card1, "mix", 0.0, 100.0, 100.0, "%", step=1.0)
+        g1 = self._slider_grid(card1)
+        self.pitch_st_var = self._add_slider(g1, "semitones", -12.0, 12.0, 0.0, "st", step=0.1, grid_pos=(0, 0), boxed=True)
+        self.pitch_cents_var = self._add_slider(g1, "fine_tune", -100.0, 100.0, 0.0, "ct", step=1.0, grid_pos=(0, 1), boxed=True)
+        self.pitch_mix_var = self._add_slider(g1, "mix", 0.0, 100.0, 100.0, "%", step=1.0, grid_pos=(1, 0), boxed=True)
 
         qrow = ctk.CTkFrame(card1, fg_color="transparent")
-        qrow.pack(fill="x", padx=14, pady=(6, 14))
+        qrow.pack(fill="x", padx=15, pady=(2, 14))
         for label, st_val in [
             ("-12 st", -12.0),
             ("-5 st", -5.0),
@@ -2084,9 +2269,10 @@ class VoxCraftApp(ctk.CTk):
                 label,
                 lambda v=st_val: self._quick_pitch(v),
                 is_key=False,
-                bordered=False,
-                width=74,
-                height=28,
+                bordered=True,
+                font_key="mono_sm_b",
+                width=76,
+                height=30,
                 corner_radius=8,
             ).pack(side="left", padx=4)
 
@@ -2095,24 +2281,26 @@ class VoxCraftApp(ctk.CTk):
         card2.pack(fill="x", padx=10, pady=8)
 
         hdr2 = ctk.CTkFrame(card2, fg_color="transparent")
-        hdr2.pack(fill="x", padx=16, pady=(12, 8))
+        hdr2.pack(fill="x", padx=16, pady=(14, 6))
         self.fshift_en_var = ctk.BooleanVar(value=False)
         self._switch(hdr2, "freq_shift", self.fshift_en_var, self._on_param_change, font_key="h3_b").pack(side="left")
 
-        self.fshift_hz_var = self._add_slider(card2, "shift_hz", -500.0, 500.0, 0.0, "Hz", step=1.0)
-        self.fshift_mix_var = self._add_slider(card2, "mix", 0.0, 100.0, 100.0, "%", step=1.0)
+        g2 = self._slider_grid(card2)
+        self.fshift_hz_var = self._add_slider(g2, "shift_hz", -500.0, 500.0, 0.0, "Hz", step=1.0, grid_pos=(0, 0), boxed=True)
+        self.fshift_mix_var = self._add_slider(g2, "mix", 0.0, 100.0, 100.0, "%", step=1.0, grid_pos=(0, 1), boxed=True)
 
         qrow2 = ctk.CTkFrame(card2, fg_color="transparent")
-        qrow2.pack(fill="x", padx=14, pady=(6, 14))
+        qrow2.pack(fill="x", padx=15, pady=(2, 14))
         for label, hz_val in [("-120 Hz", -120.0), ("-30 Hz", -30.0), ("0 Hz", 0.0), ("+50 Hz", 50.0), ("+180 Hz", 180.0)]:
             self._btn(
                 qrow2,
                 label,
                 lambda v=hz_val: self._quick_fshift(v),
                 is_key=False,
-                bordered=False,
-                width=82,
-                height=28,
+                bordered=True,
+                font_key="mono_sm_b",
+                width=84,
+                height=30,
                 corner_radius=8,
             ).pack(side="left", padx=4)
 
@@ -2121,26 +2309,28 @@ class VoxCraftApp(ctk.CTk):
         card3.pack(fill="x", padx=10, pady=8)
 
         hdr3 = ctk.CTkFrame(card3, fg_color="transparent")
-        hdr3.pack(fill="x", padx=16, pady=(12, 8))
+        hdr3.pack(fill="x", padx=16, pady=(14, 6))
         self.voc_en_var = ctk.BooleanVar(value=False)
         self._switch(hdr3, "vocoder", self.voc_en_var, self._on_param_change, font_key="h3_b").pack(side="left")
 
         voc_row = ctk.CTkFrame(card3, fg_color="transparent")
-        voc_row.pack(fill="x", padx=16, pady=(0, 8))
-        self._lbl(voc_row, "carrier", font_key="sm", color_role="text_muted").pack(side="left", padx=(0, 12))
+        voc_row.pack(fill="x", padx=16, pady=(2, 6))
+        self._lbl(voc_row, "carrier", font_key="sm_m", color_role="text_muted").pack(side="left", padx=(0, 12))
         self.voc_carrier_var = ctk.StringVar(value=self._t("wave_saw"))
         self.voc_carrier_menu = self._optmenu(
             voc_row,
             variable=self.voc_carrier_var,
             values=[self._t("wave_saw"), self._t("wave_chord"), self._t("wave_sq"), self._t("wave_whisper")],
             corner_radius=8,
+            height=30,
             command=lambda _: self._on_param_change(),
         )
         self.voc_carrier_menu.pack(side="left")
 
-        self.voc_freq_var = self._add_slider(card3, "base_freq", 55.0, 300.0, 110.0, "Hz", step=1.0)
-        self.voc_smooth_var = self._add_slider(card3, "smoothness", 10.0, 95.0, 45.0, "%", step=1.0)
-        self.voc_mix_var = self._add_slider(card3, "mix", 0.0, 100.0, 85.0, "%", step=1.0)
+        g3 = self._slider_grid(card3)
+        self.voc_freq_var = self._add_slider(g3, "base_freq", 55.0, 300.0, 110.0, "Hz", step=1.0, grid_pos=(0, 0), boxed=True)
+        self.voc_smooth_var = self._add_slider(g3, "smoothness", 10.0, 95.0, 45.0, "%", step=1.0, grid_pos=(0, 1), boxed=True)
+        self.voc_mix_var = self._add_slider(g3, "mix", 0.0, 100.0, 85.0, "%", step=1.0, grid_pos=(1, 0), boxed=True)
 
     def _build_eq_tab(self, tab):
         th = self._c()
@@ -2148,24 +2338,30 @@ class VoxCraftApp(ctk.CTk):
         top.pack(fill="x", padx=10, pady=8)
 
         hdr = ctk.CTkFrame(top, fg_color="transparent")
-        hdr.pack(fill="x", padx=16, pady=(10, 6))
+        hdr.pack(fill="x", padx=16, pady=(12, 8))
         self.eq_en_var = ctk.BooleanVar(value=True)
         self._switch(hdr, "equalizer", self.eq_en_var, self._on_param_change, font_key="h3_b").pack(side="left")
 
+        right_hdr = ctk.CTkFrame(hdr, fg_color="transparent")
+        right_hdr.pack(side="right")
+        self.eq_hpf_badge = self._lbl(
+            right_hdr, "HPF 80 Hz", font_key="mono_sm_b", color_role="accent", is_key=False
+        )
+        self.eq_hpf_badge.pack(side="left", padx=(0, 12))
         self._btn(
-            hdr,
+            right_hdr,
             "reset_eq",
             self._reset_eq,
-            bordered=False,
-            width=96,
-            height=28,
+            bordered=True,
+            width=102,
+            height=30,
             corner_radius=8,
-        ).pack(side="right")
+        ).pack(side="left")
 
         self.eq_canvas = tk.Canvas(
-            top, height=190, bg=th["canvas_bg"], highlightthickness=1, highlightbackground=th["canvas_border"]
+            top, height=205, bg=th["canvas_bg"], highlightthickness=1, highlightbackground=th["canvas_border"]
         )
-        self.eq_canvas.pack(fill="x", padx=16, pady=(4, 14))
+        self.eq_canvas.pack(fill="x", padx=16, pady=(2, 14))
         self.eq_canvas.bind("<Configure>", lambda _e: self._schedule_eq_redraw())
         self._reg_theme(
             self.eq_canvas,
@@ -2178,16 +2374,16 @@ class VoxCraftApp(ctk.CTk):
         cuts = ctk.CTkFrame(bot, fg_color="transparent")
         cuts.pack(fill="x", padx=14, pady=(12, 6))
 
-        hpf_box = self._card(cuts, role="subcard", corner_radius=10)
+        hpf_box = self._card(cuts, role="subcard", bordered=True, corner_radius=10)
         hpf_box.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self.hpf_en_var = ctk.BooleanVar(value=True)
-        self._switch(hpf_box, "hpf", self.hpf_en_var, self._on_param_change).pack(anchor="w", padx=12, pady=(8, 0))
+        self._switch(hpf_box, "hpf", self.hpf_en_var, self._on_param_change).pack(anchor="w", padx=12, pady=(10, 0))
         self.hpf_hz_var = self._add_slider(hpf_box, "frequency", 20.0, 1000.0, 80.0, "Hz", step=5.0)
 
-        lpf_box = self._card(cuts, role="subcard", corner_radius=10)
+        lpf_box = self._card(cuts, role="subcard", bordered=True, corner_radius=10)
         lpf_box.pack(side="left", fill="x", expand=True, padx=(6, 0))
         self.lpf_en_var = ctk.BooleanVar(value=False)
-        self._switch(lpf_box, "lpf", self.lpf_en_var, self._on_param_change).pack(anchor="w", padx=12, pady=(8, 0))
+        self._switch(lpf_box, "lpf", self.lpf_en_var, self._on_param_change).pack(anchor="w", padx=12, pady=(10, 0))
         self.lpf_hz_var = self._add_slider(lpf_box, "frequency", 1200.0, 18000.0, 12000.0, "Hz", step=100.0)
 
         bands_frame = ctk.CTkFrame(bot, fg_color="transparent")
@@ -2208,56 +2404,61 @@ class VoxCraftApp(ctk.CTk):
         self.phaser_en_var = ctk.BooleanVar(value=False)
         self._switch(
             c1, "Phaser", self.phaser_en_var, self._on_param_change, font_key="h3_b", is_key=False
-        ).pack(anchor="w", padx=16, pady=(12, 8))
-        self.phaser_stages_var = self._add_slider(c1, "stages", 2.0, 12.0, 6.0, "x", step=2.0)
-        self.phaser_freq_var = self._add_slider(c1, "lfo_speed", 0.1, 6.0, 0.8, "Hz", step=0.1)
-        self.phaser_depth_var = self._add_slider(c1, "depth", 0.0, 100.0, 70.0, "%", step=1.0)
-        self.phaser_fb_var = self._add_slider(c1, "feedback", -90.0, 90.0, 45.0, "%", step=1.0)
-        self.phaser_mix_var = self._add_slider(c1, "mix", 0.0, 100.0, 60.0, "%", step=1.0)
+        ).pack(anchor="w", padx=16, pady=(14, 6))
+        g1 = self._slider_grid(c1)
+        self.phaser_stages_var = self._add_slider(g1, "stages", 2.0, 12.0, 6.0, "x", step=2.0, grid_pos=(0, 0), boxed=True)
+        self.phaser_freq_var = self._add_slider(g1, "lfo_speed", 0.1, 6.0, 0.8, "Hz", step=0.1, grid_pos=(0, 1), boxed=True)
+        self.phaser_depth_var = self._add_slider(g1, "depth", 0.0, 100.0, 70.0, "%", step=1.0, grid_pos=(1, 0), boxed=True)
+        self.phaser_fb_var = self._add_slider(g1, "feedback", -90.0, 90.0, 45.0, "%", step=1.0, grid_pos=(1, 1), boxed=True)
+        self.phaser_mix_var = self._add_slider(g1, "mix", 0.0, 100.0, 60.0, "%", step=1.0, grid_pos=(2, 0), boxed=True)
 
         c2 = self._card(scroll, role="card", corner_radius=12)
         c2.pack(fill="x", padx=10, pady=8)
         self.wah_en_var = ctk.BooleanVar(value=False)
         self._switch(
             c2, "Wah-Wah", self.wah_en_var, self._on_param_change, font_key="h3_b", is_key=False
-        ).pack(anchor="w", padx=16, pady=(12, 8))
-        self.wah_freq_var = self._add_slider(c2, "lfo_freq", 0.2, 8.0, 1.5, "Hz", step=0.1)
-        self.wah_depth_var = self._add_slider(c2, "depth", 0.0, 100.0, 75.0, "%", step=1.0)
-        self.wah_res_var = self._add_slider(c2, "resonance", 0.5, 8.0, 2.8, "x", step=0.1)
-        self.wah_mix_var = self._add_slider(c2, "mix", 0.0, 100.0, 75.0, "%", step=1.0)
+        ).pack(anchor="w", padx=16, pady=(14, 6))
+        g2 = self._slider_grid(c2)
+        self.wah_freq_var = self._add_slider(g2, "lfo_freq", 0.2, 8.0, 1.5, "Hz", step=0.1, grid_pos=(0, 0), boxed=True)
+        self.wah_depth_var = self._add_slider(g2, "depth", 0.0, 100.0, 75.0, "%", step=1.0, grid_pos=(0, 1), boxed=True)
+        self.wah_res_var = self._add_slider(g2, "resonance", 0.5, 8.0, 2.8, "x", step=0.1, grid_pos=(1, 0), boxed=True)
+        self.wah_mix_var = self._add_slider(g2, "mix", 0.0, 100.0, 75.0, "%", step=1.0, grid_pos=(1, 1), boxed=True)
 
         c3 = self._card(scroll, role="card", corner_radius=12)
         c3.pack(fill="x", padx=10, pady=8)
         self.chorus_en_var = ctk.BooleanVar(value=False)
         self._switch(c3, "chorus_flanger", self.chorus_en_var, self._on_param_change, font_key="h3_b").pack(
-            anchor="w", padx=16, pady=(12, 8)
+            anchor="w", padx=16, pady=(14, 6)
         )
-        self.chorus_rate_var = self._add_slider(c3, "lfo_speed", 0.1, 8.0, 1.2, "Hz", step=0.1)
-        self.chorus_delay_var = self._add_slider(c3, "base_delay", 1.5, 35.0, 14.0, "ms", step=0.5)
-        self.chorus_depth_var = self._add_slider(c3, "modulation", 0.5, 15.0, 4.5, "ms", step=0.5)
-        self.chorus_fb_var = self._add_slider(c3, "feedback", 0.0, 85.0, 25.0, "%", step=1.0)
-        self.chorus_mix_var = self._add_slider(c3, "mix", 0.0, 100.0, 50.0, "%", step=1.0)
+        g3 = self._slider_grid(c3)
+        self.chorus_rate_var = self._add_slider(g3, "lfo_speed", 0.1, 8.0, 1.2, "Hz", step=0.1, grid_pos=(0, 0), boxed=True)
+        self.chorus_delay_var = self._add_slider(g3, "base_delay", 1.5, 35.0, 14.0, "ms", step=0.5, grid_pos=(0, 1), boxed=True)
+        self.chorus_depth_var = self._add_slider(g3, "modulation", 0.5, 15.0, 4.5, "ms", step=0.5, grid_pos=(1, 0), boxed=True)
+        self.chorus_fb_var = self._add_slider(g3, "feedback", 0.0, 85.0, 25.0, "%", step=1.0, grid_pos=(1, 1), boxed=True)
+        self.chorus_mix_var = self._add_slider(g3, "mix", 0.0, 100.0, 50.0, "%", step=1.0, grid_pos=(2, 0), boxed=True)
 
         c4 = self._card(scroll, role="card", corner_radius=12)
         c4.pack(fill="x", padx=10, pady=8)
         self.trem_en_var = ctk.BooleanVar(value=False)
         self._switch(
             c4, "Tremolo", self.trem_en_var, self._on_param_change, font_key="h3_b", is_key=False
-        ).pack(anchor="w", padx=16, pady=(12, 8))
+        ).pack(anchor="w", padx=16, pady=(14, 6))
         trem_row = ctk.CTkFrame(c4, fg_color="transparent")
-        trem_row.pack(fill="x", padx=16, pady=(0, 8))
-        self._lbl(trem_row, "waveform", font_key="sm", color_role="text_muted").pack(side="left", padx=(0, 12))
+        trem_row.pack(fill="x", padx=16, pady=(2, 6))
+        self._lbl(trem_row, "waveform", font_key="sm_m", color_role="text_muted").pack(side="left", padx=(0, 12))
         self.trem_wave_var = ctk.StringVar(value=self._t("wave_sine"))
         self.trem_wave_menu = self._optmenu(
             trem_row,
             variable=self.trem_wave_var,
             values=[self._t("wave_sine"), self._t("wave_tri"), self._t("wave_sq"), self._t("wave_saw")],
             corner_radius=8,
+            height=30,
             command=lambda _: self._on_param_change(),
         )
         self.trem_wave_menu.pack(side="left")
-        self.trem_freq_var = self._add_slider(c4, "frequency", 0.5, 25.0, 6.0, "Hz", step=0.5)
-        self.trem_depth_var = self._add_slider(c4, "intensity", 0.0, 100.0, 65.0, "%", step=1.0)
+        g4 = self._slider_grid(c4)
+        self.trem_freq_var = self._add_slider(g4, "frequency", 0.5, 25.0, 6.0, "Hz", step=0.5, grid_pos=(0, 0), boxed=True)
+        self.trem_depth_var = self._add_slider(g4, "intensity", 0.0, 100.0, 65.0, "%", step=1.0, grid_pos=(0, 1), boxed=True)
 
     def _build_fx_tab(self, tab):
         scroll = self._scroll(tab)
@@ -2267,36 +2468,39 @@ class VoxCraftApp(ctk.CTk):
         c1.pack(fill="x", padx=10, pady=8)
         self.ring_en_var = ctk.BooleanVar(value=False)
         self._switch(c1, "ring_mod", self.ring_en_var, self._on_param_change, font_key="h3_b").pack(
-            anchor="w", padx=16, pady=(12, 8)
+            anchor="w", padx=16, pady=(14, 6)
         )
 
         wave_row = ctk.CTkFrame(c1, fg_color="transparent")
-        wave_row.pack(fill="x", padx=16, pady=(0, 8))
-        self._lbl(wave_row, "waveform", font_key="sm", color_role="text_muted").pack(side="left", padx=(0, 12))
+        wave_row.pack(fill="x", padx=16, pady=(2, 6))
+        self._lbl(wave_row, "waveform", font_key="sm_m", color_role="text_muted").pack(side="left", padx=(0, 12))
         self.ring_wave_var = ctk.StringVar(value=self._t("wave_sine"))
         self.ring_wave_menu = self._optmenu(
             wave_row,
             variable=self.ring_wave_var,
             values=[self._t("wave_sine"), self._t("wave_sq"), self._t("wave_tri")],
             corner_radius=8,
+            height=30,
             command=lambda _: self._on_param_change(),
         )
         self.ring_wave_menu.pack(side="left")
 
-        self.ring_freq_var = self._add_slider(c1, "carrier_freq", 5.0, 400.0, 60.0, "Hz", step=1.0)
-        self.ring_mix_var = self._add_slider(c1, "mix", 0.0, 100.0, 70.0, "%", step=1.0)
+        g1 = self._slider_grid(c1)
+        self.ring_freq_var = self._add_slider(g1, "carrier_freq", 5.0, 400.0, 60.0, "Hz", step=1.0, grid_pos=(0, 0), boxed=True)
+        self.ring_mix_var = self._add_slider(g1, "mix", 0.0, 100.0, 70.0, "%", step=1.0, grid_pos=(0, 1), boxed=True)
 
         c2 = self._card(scroll, role="card", corner_radius=12)
         c2.pack(fill="x", padx=10, pady=8)
         self.dist_en_var = ctk.BooleanVar(value=False)
         self._switch(c2, "dist_bit", self.dist_en_var, self._on_param_change, font_key="h3_b").pack(
-            anchor="w", padx=16, pady=(12, 8)
+            anchor="w", padx=16, pady=(14, 6)
         )
 
-        self.dist_drive_var = self._add_slider(c2, "drive_sat", 1.0, 25.0, 3.0, "x", step=0.2)
-        self.dist_bits_var = self._add_slider(c2, "resolution", 4.0, 16.0, 16.0, "bits", step=1.0)
-        self.dist_down_var = self._add_slider(c2, "downsample", 1.0, 16.0, 1.0, "x", step=1.0)
-        self.dist_mix_var = self._add_slider(c2, "mix", 0.0, 100.0, 70.0, "%", step=1.0)
+        g2 = self._slider_grid(c2)
+        self.dist_drive_var = self._add_slider(g2, "drive_sat", 1.0, 25.0, 3.0, "x", step=0.2, grid_pos=(0, 0), boxed=True)
+        self.dist_bits_var = self._add_slider(g2, "resolution", 4.0, 16.0, 16.0, "bits", step=1.0, grid_pos=(0, 1), boxed=True)
+        self.dist_down_var = self._add_slider(g2, "downsample", 1.0, 16.0, 1.0, "x", step=1.0, grid_pos=(1, 0), boxed=True)
+        self.dist_mix_var = self._add_slider(g2, "mix", 0.0, 100.0, 70.0, "%", step=1.0, grid_pos=(1, 1), boxed=True)
 
     def _build_space_tab(self, tab):
         scroll = self._scroll(tab)
@@ -2306,29 +2510,31 @@ class VoxCraftApp(ctk.CTk):
         c1.pack(fill="x", padx=10, pady=8)
         self.echo_en_var = ctk.BooleanVar(value=False)
         self._switch(c1, "echo_delay", self.echo_en_var, self._on_param_change, font_key="h3_b").pack(
-            anchor="w", padx=16, pady=(12, 8)
+            anchor="w", padx=16, pady=(14, 6)
         )
 
-        self.echo_delay_var = self._add_slider(c1, "delay", 10.0, 700.0, 220.0, "ms", step=2.0)
-        self.echo_fb_var = self._add_slider(c1, "feedback", 0.0, 85.0, 35.0, "%", step=1.0)
-        self.echo_mix_var = self._add_slider(c1, "echo_vol", 0.0, 100.0, 35.0, "%", step=1.0)
+        g1 = self._slider_grid(c1)
+        self.echo_delay_var = self._add_slider(g1, "delay", 10.0, 700.0, 220.0, "ms", step=2.0, grid_pos=(0, 0), boxed=True)
+        self.echo_fb_var = self._add_slider(g1, "feedback", 0.0, 85.0, 35.0, "%", step=1.0, grid_pos=(0, 1), boxed=True)
+        self.echo_mix_var = self._add_slider(g1, "echo_vol", 0.0, 100.0, 35.0, "%", step=1.0, grid_pos=(1, 0), boxed=True)
 
         c2 = self._card(scroll, role="card", corner_radius=12)
         c2.pack(fill="x", padx=10, pady=8)
         self.rev_en_var = ctk.BooleanVar(value=False)
         self._switch(c2, "reverb", self.rev_en_var, self._on_param_change, font_key="h3_b").pack(
-            anchor="w", padx=16, pady=(12, 8)
+            anchor="w", padx=16, pady=(14, 6)
         )
-        self.rev_room_var = self._add_slider(c2, "room_size", 0.0, 100.0, 60.0, "%", step=1.0)
-        self.rev_damp_var = self._add_slider(c2, "damping", 5.0, 92.0, 45.0, "%", step=1.0)
-        self.rev_mix_var = self._add_slider(c2, "mix", 0.0, 100.0, 30.0, "%", step=1.0)
+        g2 = self._slider_grid(c2)
+        self.rev_room_var = self._add_slider(g2, "room_size", 0.0, 100.0, 60.0, "%", step=1.0, grid_pos=(0, 0), boxed=True)
+        self.rev_damp_var = self._add_slider(g2, "damping", 5.0, 92.0, 45.0, "%", step=1.0, grid_pos=(0, 1), boxed=True)
+        self.rev_mix_var = self._add_slider(g2, "mix", 0.0, 100.0, 30.0, "%", step=1.0, grid_pos=(1, 0), boxed=True)
 
     def _build_mixer_tab(self, tab):
         box = self._scroll(tab)
         box.pack(fill="both", expand=True, padx=6, pady=6)
 
         self._lbl(box, "effects_chain", font_key="h3_b", color_role="text_primary").pack(
-            anchor="w", padx=12, pady=(8, 8)
+            anchor="w", padx=12, pady=(10, 10)
         )
 
         modules = [
@@ -2350,36 +2556,67 @@ class VoxCraftApp(ctk.CTk):
 
         grid = ctk.CTkFrame(box, fg_color="transparent")
         grid.pack(fill="x", padx=8, pady=4)
-        grid.columnconfigure(0, weight=1)
-        grid.columnconfigure(1, weight=1)
+        grid.columnconfigure(0, weight=1, uniform="mgrid")
+        grid.columnconfigure(1, weight=1, uniform="mgrid")
         for idx, (label_key, is_k, var) in enumerate(modules):
             card = self._card(grid, role="card", corner_radius=10)
             card.grid(row=idx // 2, column=idx % 2, sticky="ew", padx=6, pady=6)
-            self._switch(card, label_key, var, self._on_param_change, font_key="md", is_key=is_k).pack(
-                anchor="w", padx=14, pady=12
+            row = ctk.CTkFrame(card, fg_color="transparent")
+            row.pack(fill="x", padx=14, pady=12)
+            self._lbl(row, f"{idx + 1:02d}", font_key="mono_sm_b", color_role="accent", is_key=False).pack(
+                side="left", padx=(0, 10)
+            )
+            self._switch(row, label_key, var, self._on_param_change, font_key="md_m", is_key=is_k).pack(
+                side="left", fill="x", expand=True
             )
 
         self._btn(
             box,
             "reset_effects",
             lambda: self._apply_preset("Normal"),
-            hover_override="#dc2626",
-            corner_radius=8,
-            height=34,
+            hover_role="danger",
+            corner_radius=9,
+            height=36,
+            width=190,
         ).pack(pady=16)
 
     # ------------------------------------------------------------------ #
     # Helpers de Widgets
     # ------------------------------------------------------------------ #
-    def _add_slider(self, parent, label_key: str, vmin: float, vmax: float, default: float, unit: str, step: float = 0.5):
+    def _add_slider(
+        self,
+        parent,
+        label_key: str,
+        vmin: float,
+        vmax: float,
+        default: float,
+        unit: str,
+        step: float = 0.5,
+        grid_pos: tuple[int, int] | None = None,
+        boxed: bool = False,
+    ):
         th = self._c()
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x", padx=14, pady=4)
+        if boxed:
+            frame = self._card(parent, role="subcard", bordered=True, corner_radius=10)
+            inner_pad_x = 12
+            top_pad_y = (10, 4)
+            slider_pad_y = (2, 10)
+        else:
+            frame = ctk.CTkFrame(parent, fg_color="transparent")
+            inner_pad_x = 0
+            top_pad_y = (0, 2)
+            slider_pad_y = (2, 4)
+
+        if grid_pos is not None:
+            frame.grid(row=grid_pos[0], column=grid_pos[1], sticky="ew", padx=5, pady=5)
+        else:
+            frame.pack(fill="x", padx=12 if boxed else 14, pady=4)
 
         top = ctk.CTkFrame(frame, fg_color="transparent")
-        top.pack(fill="x")
-        self._lbl(top, label_key, font_key="sm", color_role="text_body").pack(side="left")
-        val_lbl = self._lbl(top, f"{default:.1f} {unit}", font_key="sm_b", color_role="accent", is_key=False)
+        top.pack(fill="x", padx=inner_pad_x, pady=top_pad_y)
+        self._lbl(top, label_key, font_key="sm_m", color_role="text_body").pack(side="left")
+        init_txt = f"{int(round(default))} {unit}" if (unit in ("Hz", "ms", "%", "bits", "x", "ct") and step >= 1.0) else f"{default:.1f} {unit}"
+        val_lbl = self._lbl(top, init_txt, font_key="mono_sm_b", color_role="accent", is_key=False)
         val_lbl.pack(side="right")
 
         var = ctk.DoubleVar(value=default)
@@ -2405,7 +2642,7 @@ class VoxCraftApp(ctk.CTk):
             variable=var,
             command=on_slide,
         )
-        slider.pack(fill="x", pady=(2, 4))
+        slider.pack(fill="x", padx=inner_pad_x, pady=slider_pad_y)
         self._reg_theme(
             slider,
             lambda t, s=slider: s.configure(
@@ -2422,11 +2659,11 @@ class VoxCraftApp(ctk.CTk):
 
     def _add_vertical_eq_band(self, parent, title_key: str):
         th = self._c()
-        col = self._card(parent, role="subcard", corner_radius=10)
+        col = self._card(parent, role="subcard", bordered=True, corner_radius=10)
         col.pack(side="left", fill="both", expand=True, padx=4)
 
-        val_lbl = self._lbl(col, "0.0 dB", font_key="xs_b", color_role="accent", is_key=False)
-        val_lbl.pack(pady=(8, 2))
+        val_lbl = self._lbl(col, "+0.0 dB", font_key="mono_xs_b", color_role="accent", is_key=False)
+        val_lbl.pack(pady=(10, 4))
 
         var = ctk.DoubleVar(value=0.0)
 
@@ -2459,7 +2696,7 @@ class VoxCraftApp(ctk.CTk):
             ),
         )
 
-        self._lbl(col, title_key, font_key="xs", color_role="text_muted", justify="center").pack(pady=(2, 8))
+        self._lbl(col, title_key, font_key="mono_xs", color_role="text_muted", justify="center").pack(pady=(4, 10))
         var._val_lbl = val_lbl
         var._unit = "dB"
         var._step = 0.5
@@ -2558,6 +2795,7 @@ class VoxCraftApp(ctk.CTk):
         self.dsp.update_params(p)
         self._update_hotkey_hint()
         eq_sig = (
+            p.bypass,
             p.eq_enabled,
             p.eq_hpf_enabled,
             round(p.eq_hpf_hz, 1),
@@ -2715,10 +2953,17 @@ class VoxCraftApp(ctk.CTk):
         return names
 
     def _on_preset_selected(self, choice: str):
-        clean = choice[2:] if choice.startswith("★ ") else self._preset_to_internal(choice)
-        self._apply_preset(clean)
+        if choice.startswith("★ "):
+            self._apply_preset(choice[2:], prefer_user=True)
+        else:
+            self._apply_preset(self._preset_to_internal(choice), prefer_user=False)
 
-    def _apply_preset(self, name: str, save_cfg: bool = True, preserve_bypass: bool = True):
+    def _apply_preset(self, name: str, save_cfg: bool = True, preserve_bypass: bool = True, prefer_user: bool = False):
+        if prefer_user and name in self.user_presets:
+            self._load_params_to_ui(self.user_presets[name].copy(), preserve_bypass=preserve_bypass)
+            if save_cfg:
+                self._save_config()
+            return
         canonical = self._preset_to_internal(name)
         if canonical in self.builtin_presets:
             self._load_params_to_ui(self.builtin_presets[canonical].copy(), preserve_bypass=preserve_bypass)
@@ -2733,7 +2978,9 @@ class VoxCraftApp(ctk.CTk):
         name = simpledialog.askstring(self._t("save_preset_title"), self._t("save_preset_prompt"), parent=self)
         if not name or not name.strip():
             return
-        name = name.strip()
+        name = name.lstrip("★ ").strip()
+        if not name:
+            return
         self.user_presets[name] = self.params.copy()
         save_user_presets(self.user_presets)
         self.preset_menu.configure(values=self._all_preset_names())
@@ -2797,8 +3044,10 @@ class VoxCraftApp(ctk.CTk):
             self.app_config["monitor_device"] = self._device_to_dict(mon_item)
 
         preset_choice = self.preset_var.get()
-        clean_preset = preset_choice[2:] if preset_choice.startswith("★ ") else self._preset_to_internal(preset_choice)
+        is_user_preset = preset_choice.startswith("★ ")
+        clean_preset = preset_choice[2:] if is_user_preset else self._preset_to_internal(preset_choice)
         self.app_config["last_preset"] = clean_preset
+        self.app_config["last_preset_is_user"] = is_user_preset
         self.app_config["theme"] = self.ui_theme
         self.app_config["language"] = self.ui_lang
         self.app_config["bypass_enabled"] = bool(self.bypass_var.get())
@@ -2921,10 +3170,15 @@ class VoxCraftApp(ctk.CTk):
         if was_running:
             self._start_audio()
         elif not initial_load:
-            self.status_lbl.configure(
-                text=self._t("devices_updated", ins=len(self.in_devices), outs=len(self.out_devices)),
-                text_color=self._c()["accent"],
+            self._set_status(
+                self._t("devices_updated", ins=len(self.in_devices), outs=len(self.out_devices)),
+                "accent",
             )
+
+    def _set_status(self, text: str, role: str = "text_muted"):
+        self._status_role = role
+        th = self._c()
+        self.status_lbl.configure(text=text, text_color=th.get(role, th["text_muted"]))
 
     def _refresh_devices(self, reinit_backend: bool = True, initial_load: bool = False):
         was_running = self.router.running
@@ -2940,8 +3194,8 @@ class VoxCraftApp(ctk.CTk):
         self._audio_op_seq += 1
         op_seq = self._audio_op_seq
         self.router.abort_start()
-        self.status_lbl.configure(text=self._t("refreshing_devices"), text_color=self._c()["accent"])
-        self.power_btn.configure(text=self._t("start_audio"), fg_color="#059669", hover_color="#10b981")
+        self._set_status(self._t("refreshing_devices"), "accent")
+        self._style_power_btn(False)
 
         def _worker():
             with self._audio_worker_lock:
@@ -2982,8 +3236,8 @@ class VoxCraftApp(ctk.CTk):
     def _stop_audio_async(self):
         self._audio_op_seq += 1
         self.router.abort_start()
-        self.power_btn.configure(text=self._t("start_audio"), fg_color="#059669", hover_color="#10b981")
-        self.status_lbl.configure(text=self._t("stopped"), text_color=self._c()["text_muted"])
+        self._style_power_btn(False)
+        self._set_status(self._t("stopped"), "text_muted")
 
         def _worker():
             with self._audio_worker_lock:
@@ -3012,7 +3266,7 @@ class VoxCraftApp(ctk.CTk):
         mon_en = bool(self.monitor_var.get())
 
         self.router.abort_start()
-        self.status_lbl.configure(text=self._t("connecting_audio"), text_color=self._c()["accent"])
+        self._set_status(self._t("connecting_audio"), "accent")
 
         def _worker():
             ok, msg = False, "Interrompido"
@@ -3051,8 +3305,8 @@ class VoxCraftApp(ctk.CTk):
                             synced_fallback = True
                     if synced_fallback:
                         self._save_config()
-                    self.power_btn.configure(text=self._t("stop_audio"), fg_color="#dc2626", hover_color="#ef4444")
-                    self.status_lbl.configure(text=msg, text_color="#10b981")
+                    self._style_power_btn(True)
+                    self._set_status(msg, "live")
                     self._schedule_eq_redraw()
                     if self._ui_loop_job is not None:
                         try:
@@ -3062,12 +3316,12 @@ class VoxCraftApp(ctk.CTk):
                         self._ui_loop_job = None
                     self._ui_loop_job = self.after(20, self._schedule_ui_loop)
                 else:
-                    self.power_btn.configure(text=self._t("start_audio"), fg_color="#059669", hover_color="#10b981")
+                    self._style_power_btn(False)
                     if msg != "Interrompido":
                         messagebox.showerror(self._t("err_audio_title"), msg)
-                        self.status_lbl.configure(text=msg, text_color="#ef4444")
+                        self._set_status(msg, "danger")
                     else:
-                        self.status_lbl.configure(text=self._t("stopped"), text_color=self._c()["text_muted"])
+                        self._set_status(self._t("stopped"), "text_muted")
 
             try:
                 self.after(0, _done)
@@ -3101,12 +3355,23 @@ class VoxCraftApp(ctk.CTk):
         except Exception:
             pass
         th = self._c()
+        badge = getattr(self, "eq_hpf_badge", None)
+        if badge is not None:
+            if self.params.bypass:
+                badge.configure(text="BYPASS", text_color=th["warn"])
+            elif not self.params.eq_enabled:
+                badge.configure(text="FLAT", text_color=th["text_subtle"])
+            elif self.params.eq_hpf_enabled:
+                badge.configure(text=f"HPF {int(round(self.params.eq_hpf_hz))} Hz", text_color=th["accent"])
+            else:
+                badge.configure(text="EQ ON", text_color=th["live"])
+
         c = self.eq_canvas
         w = max(400, c.winfo_width())
         h = max(160, c.winfo_height())
         c.delete("all")
 
-        pad_x, pad_y = 36, 16
+        pad_x, pad_y = 38, 16
         gw = w - 2 * pad_x
         gh = h - 2 * pad_y
 
@@ -3115,7 +3380,9 @@ class VoxCraftApp(ctk.CTk):
             y = pad_y + (18.0 - db) / 36.0 * gh
             color = th["grid_zero"] if db == 0 else th["grid_line"]
             c.create_line(pad_x, y, w - pad_x, y, fill=color, dash=(3, 3) if db != 0 else ())
-            c.create_text(pad_x - 6, y, text=f"{db:+d}", fill=th["grid_text"], font=("Segoe UI", 8), anchor="e")
+            c.create_text(
+                pad_x - 6, y, text=f"{db:+d}", fill=th["grid_text"], font=(self._mono_font_family, 8), anchor="e"
+            )
 
         # Grade logarítmica de frequências (20 Hz -> 20 kHz)
         f_min, f_max = 20.0, 20000.0
@@ -3124,12 +3391,14 @@ class VoxCraftApp(ctk.CTk):
             x = pad_x + (np.log10(f / f_min) / log_span) * gw
             c.create_line(x, pad_y, x, h - pad_y, fill=th["grid_line"])
             lbl = f"{f // 1000}k" if f >= 1000 else str(f)
-            c.create_text(x, h - 5, text=lbl, fill=th["grid_text"], font=("Segoe UI", 8))
+            c.create_text(x, h - 5, text=lbl, fill=th["grid_text"], font=(self._mono_font_family, 8))
 
         if not self.params.eq_enabled:
             y0 = pad_y + 0.5 * gh
             c.create_line(pad_x, y0, w - pad_x, y0, fill=th["text_subtle"], width=2)
-            c.create_text(w / 2, y0 - 14, text=self._t("eq_flat"), fill=th["grid_text"], font=("Segoe UI", 10))
+            c.create_text(
+                w / 2, y0 - 14, text=self._t("eq_flat"), fill=th["grid_text"], font=(self._ui_font_family, 10)
+            )
             return
 
         sr = self.dsp.sr
@@ -3143,7 +3412,7 @@ class VoxCraftApp(ctk.CTk):
         pts = np.column_stack((xs, ys)).ravel().tolist()
 
         if len(pts) >= 4:
-            c.create_line(*pts, fill=th["accent"], width=2, smooth=True)
+            c.create_line(*pts, fill=th["accent"], width=2.5, smooth=True)
 
     def _schedule_ui_loop(self):
         self._ui_loop_job = None
@@ -3179,9 +3448,9 @@ class VoxCraftApp(ctk.CTk):
             if force_refresh or gate_open != self._last_gate_open:
                 self._last_gate_open = gate_open
                 if gate_open:
-                    self.gate_led.configure(text=self._t("gate_open"), text_color="#10b981")
+                    self.gate_led.configure(text=self._t("gate_open"), text_color=th["live"])
                 else:
-                    self.gate_led.configure(text=self._t("gate_closed"), text_color="#f59e0b")
+                    self.gate_led.configure(text=self._t("gate_closed"), text_color=th["warn"])
 
             # Osciloscópio sem delete("all"): reutiliza os mesmos itens do Canvas (zero GDI/Tk churn)
             wc = self.wave_canvas
@@ -3204,7 +3473,7 @@ class VoxCraftApp(ctk.CTk):
                     self._wave_cached_len = n_w
                 ys = mid - np.clip(wave, -1.0, 1.0) * (mid - 4.0)
                 pts = np.column_stack((self._wave_xs, ys)).ravel().tolist()
-                color = "#f59e0b" if self.params.bypass else th["accent"]
+                color = th["warn"] if self.params.bypass else th["accent"]
                 if self._wave_line_id is None:
                     self._wave_line_id = wc.create_line(*pts, fill=color, width=2)
                 else:
@@ -3404,7 +3673,11 @@ class VoxCraftApp(ctk.CTk):
         win.transient(self)
         win.configure(fg_color=th["modal_bg"])
 
+        is_busy = False
+
         def _close_update():
+            if is_busy:
+                return
             self._update_win = None
             try:
                 win.destroy()
@@ -3421,7 +3694,7 @@ class VoxCraftApp(ctk.CTk):
             hdr_row, text=self._t("upd_header"), font=self._fonts["h2_b"], text_color=th["accent"]
         ).pack(side="left")
         ctk.CTkLabel(
-            hdr_row, text=f"v{local_id['version']}", font=self._fonts["xs_b"], text_color=th["text_subtle"]
+            hdr_row, text=f"v{local_id['version']}", font=self._fonts["mono_xs_b"], text_color=th["text_subtle"]
         ).pack(side="right")
 
         msg_lbl = ctk.CTkLabel(
@@ -3446,9 +3719,10 @@ class VoxCraftApp(ctk.CTk):
             text=self._t("upd_now_btn"),
             width=172,
             height=34,
-            corner_radius=8,
-            fg_color="#059669",
-            hover_color="#10b981",
+            corner_radius=9,
+            font=self._fonts["sm_b"],
+            fg_color=th["live"],
+            hover_color=th["live_hover"],
             text_color="#ffffff",
             state="disabled",
         )
@@ -3459,9 +3733,10 @@ class VoxCraftApp(ctk.CTk):
             text=self._t("upd_local_btn"),
             width=148,
             height=34,
-            corner_radius=8,
+            corner_radius=9,
+            font=self._fonts["sm_b"],
             fg_color=th["control_bg"],
-            hover_color="#2563eb",
+            hover_color=th["accent_deep"],
             text_color=th["text_primary"],
             border_width=1,
             border_color=th["control_border"],
@@ -3473,9 +3748,10 @@ class VoxCraftApp(ctk.CTk):
             text=self._t("upd_check_btn"),
             width=92,
             height=34,
-            corner_radius=8,
+            corner_radius=9,
+            font=self._fonts["sm_b"],
             fg_color=th["control_bg"],
-            hover_color="#2563eb",
+            hover_color=th["accent_deep"],
             text_color=th["text_primary"],
             border_width=1,
             border_color=th["control_border"],
@@ -3487,7 +3763,8 @@ class VoxCraftApp(ctk.CTk):
             text=self._t("close"),
             width=90,
             height=34,
-            corner_radius=8,
+            corner_radius=9,
+            font=self._fonts["sm_b"],
             fg_color=th["control_bg"],
             hover_color=th["control_hover"],
             text_color=th["text_primary"],
@@ -3514,6 +3791,8 @@ class VoxCraftApp(ctk.CTk):
                 pass
 
         def _set_busy(text: str):
+            nonlocal is_busy
+            is_busy = True
             safe_ui(lambda: (
                 action_btn.configure(state="disabled"),
                 local_btn.configure(state="disabled"),
@@ -3521,11 +3800,15 @@ class VoxCraftApp(ctk.CTk):
                 close_btn.configure(state="disabled"),
                 progress.configure(mode="indeterminate"),
                 progress.start(),
-                msg_lbl.configure(text=text, text_color=th["accent"]),
+                msg_lbl.configure(text=text, text_color=self._c()["accent"]),
             ))
 
         def finish_message(text: str, color: str | None = None, enable_action: bool = False, btn_text: str | None = None, cmd=None):
-            use_color = color or th["text_primary"]
+            nonlocal is_busy
+            is_busy = False
+            t_cur = self._c()
+            role_map = {"#10b981": t_cur["live"], "#f59e0b": t_cur["warn"], "#ef4444": t_cur["danger"]}
+            use_color = role_map.get(color, color) if color else t_cur["text_primary"]
             use_btn_text = btn_text or self._t("upd_now_btn")
 
             def _ui():
@@ -4150,13 +4433,15 @@ class VoxCraftApp(ctk.CTk):
             theme_card,
             variable=theme_var,
             values=[lbl for _, lbl in theme_options],
+            font=self._fonts["sm_b"],
             fg_color=th["tab_bg"],
             selected_color=th["seg_selected"],
             selected_hover_color=th["seg_selected_hover"],
             unselected_color=th["control_bg"],
             unselected_hover_color=th["control_hover"],
             text_color=th["seg_text"],
-            height=32,
+            height=34,
+            corner_radius=9,
             command=on_theme_change,
         )
         theme_seg.pack(fill="x", padx=14, pady=(0, 12))
@@ -4188,13 +4473,15 @@ class VoxCraftApp(ctk.CTk):
             lang_card,
             variable=lang_var,
             values=[LANGUAGE_LABELS[code] for code in LANGUAGES],
+            font=self._fonts["sm_b"],
             fg_color=th["tab_bg"],
             selected_color=th["seg_selected"],
             selected_hover_color=th["seg_selected_hover"],
             unselected_color=th["control_bg"],
             unselected_hover_color=th["control_hover"],
             text_color=th["seg_text"],
-            height=32,
+            height=34,
+            corner_radius=9,
             command=on_lang_change,
         )
         lang_seg.pack(fill="x", padx=14, pady=(0, 12))
@@ -4220,12 +4507,14 @@ class VoxCraftApp(ctk.CTk):
             startup_card,
             text=self._t(startup_key),
             variable=startup_var,
-            font=self._fonts["md_b"],
+            font=self._fonts["md_m"],
             fg_color=th["track_bg"],
             progress_color=th["accent"],
             button_color=th["switch_knob"],
             button_hover_color=th["switch_knob_hover"],
             text_color=th["text_primary"],
+            switch_width=40,
+            switch_height=20,
             command=on_startup_toggle,
         )
         startup_switch.pack(anchor="w", padx=14, pady=12)
@@ -4233,9 +4522,10 @@ class VoxCraftApp(ctk.CTk):
         close_btn = ctk.CTkButton(
             win,
             text=self._t("close"),
-            width=120,
+            width=128,
             height=34,
-            corner_radius=8,
+            corner_radius=9,
+            font=self._fonts["sm_b"],
             fg_color=th["control_bg"],
             hover_color=th["control_hover"],
             text_color=th["text_primary"],
@@ -4435,13 +4725,17 @@ class VoxCraftApp(ctk.CTk):
 
         if self._capturing_hotkey:
             self.hotkey_btn.configure(
-                fg_color="#d97706",
-                hover_color="#b45309",
-                text_color="#ffffff",
+                fg_color=th["warn"],
+                hover_color=th["warn"],
+                border_color=th["warn"],
+                text_color="#111827",
             )
 
         self._last_eq_sig = None
         self._last_wave_idle = False
+        self._last_gate_open = None
+        self._last_in_norm = -1.0
+        self._last_out_norm = -1.0
         self._update_hotkey_hint()
         if self._active_tab_key == "tab_eq":
             self._schedule_eq_redraw()
@@ -4469,7 +4763,7 @@ class VoxCraftApp(ctk.CTk):
         win = ctk.CTkToplevel(self)
         self._discord_win = win
         win.title(self._t("discord_title"))
-        win.geometry("540x400")
+        win.geometry("540x410")
         win.configure(fg_color=th["modal_bg"])
         win.transient(self)
 
@@ -4485,22 +4779,32 @@ class VoxCraftApp(ctk.CTk):
         ctk.CTkLabel(
             win, text=self._t("discord_header"), font=self._fonts["h2_b"], text_color=th["accent"]
         ).pack(anchor="w", padx=20, pady=(18, 10))
+        body_card = ctk.CTkFrame(
+            win, fg_color=th["card_bg"], corner_radius=12, border_width=1, border_color=th["card_border"]
+        )
+        body_card.pack(fill="both", expand=True, padx=20, pady=(0, 12))
         ctk.CTkLabel(
-            win, text=self._t("discord_body"), justify="left", font=self._fonts["sm"], text_color=th["text_body"], wraplength=500
-        ).pack(anchor="w", padx=20, pady=4)
+            body_card,
+            text=self._t("discord_body"),
+            justify="left",
+            font=self._fonts["sm"],
+            text_color=th["text_body"],
+            wraplength=472,
+        ).pack(anchor="w", padx=14, pady=14)
         ctk.CTkButton(
             win,
             text=self._t("got_it"),
-            width=120,
-            height=32,
-            corner_radius=8,
+            width=128,
+            height=34,
+            corner_radius=9,
+            font=self._fonts["sm_b"],
             fg_color=th["control_bg"],
             hover_color=th["control_hover"],
             text_color=th["text_primary"],
             border_width=1,
             border_color=th["control_border"],
             command=_close_discord,
-        ).pack(pady=16)
+        ).pack(pady=(2, 16))
         win.lift()
         win.focus_force()
 
@@ -4689,7 +4993,7 @@ class VoxCraftApp(ctk.CTk):
         lbl_key = self._format_hotkey_label(self.hotkey_spec)
         is_normal = bool(self.bypass_var.get())
         state_txt = self._t("hk_normal") if is_normal else self._t("hk_active")
-        color = "#f59e0b" if is_normal else th["accent"]
+        color = th["warn"] if is_normal else th["accent"]
         if not self.hotkey_en_var.get():
             self.hotkey_hint_lbl.configure(
                 text=f"● {state_txt} ({self._t('hk_disabled')})",
@@ -4712,11 +5016,19 @@ class VoxCraftApp(ctk.CTk):
         self._hotkey_enabled_cached = bool(self.hotkey_en_var.get())
         self._hotkey_hold_cached = bool(self.hotkey_hold_var.get())
 
-    def _on_hotkey_setting_changed(self):
-        self._sync_hotkey_cache()
+    def _release_held_hotkey_if_needed(self):
+        base = None
         with self._hotkey_lock:
             self._hotkey_is_down = False
-            self._hold_base_bypass = None
+            if self._hold_base_bypass is not None:
+                base = self._hold_base_bypass
+                self._hold_base_bypass = None
+        if base is not None:
+            self._set_bypass_state(base)
+
+    def _on_hotkey_setting_changed(self):
+        self._sync_hotkey_cache()
+        self._release_held_hotkey_if_needed()
         self._update_hotkey_hint()
         self._save_config()
 
@@ -4726,14 +5038,14 @@ class VoxCraftApp(ctk.CTk):
             return
         self._capturing_hotkey = True
         self._capture_mods.clear()
-        with self._hotkey_lock:
-            self._hotkey_is_down = False
-            self._hold_base_bypass = None
+        self._release_held_hotkey_if_needed()
+        th = self._c()
         self.hotkey_btn.configure(
             text=self._t("press_key_prompt"),
-            fg_color="#d97706",
-            hover_color="#b45309",
-            text_color="#ffffff",
+            fg_color=th["warn"],
+            hover_color=th["warn"],
+            border_color=th["warn"],
+            text_color="#111827",
         )
         self.focus_force()
         self._cap_press_id = self.bind("<KeyPress>", self._on_capture_keypress, add="+")
@@ -4773,6 +5085,7 @@ class VoxCraftApp(ctk.CTk):
             text=self._format_hotkey_label(self.hotkey_spec),
             fg_color=th["control_bg"],
             hover_color=th["control_hover"],
+            border_color=th["control_border"],
             text_color=th["text_primary"],
         )
         self._update_hotkey_hint()

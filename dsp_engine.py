@@ -241,7 +241,7 @@ class RingDelay:
         length = len(delays)
         d = np.clip(delays, 1.0, float(self.size - 2))
         read_pos = (self.write_idx + self._get_ramp(length) - d) % self.size
-        i0 = np.floor(read_pos).astype(np.int32)
+        i0 = np.floor(read_pos).astype(np.int32) % self.size
         i1 = i0 + 1
         i1[i1 >= self.size] = 0
         frac = (read_pos - i0).astype(np.float32)
@@ -278,6 +278,7 @@ class RealTimeDSPEngine:
         self.last_waveform = np.zeros(256, dtype=np.float32)
         self._ramp_f64 = np.arange(2048, dtype=np.float64)
 
+        self._pending_clear = False
         self._init_states()
 
     def _get_ramp_f64(self, n: int) -> np.ndarray:
@@ -297,12 +298,11 @@ class RealTimeDSPEngine:
             self.params = new_params.copy()
             self._eq_dirty = True
             if bool(self.params.bypass) != prev_bypass:
-                self._clear_effect_buffers_unlocked()
-                self._was_bypass = bool(self.params.bypass)
+                self._pending_clear = True
 
     def clear_effect_buffers(self):
         with self._lock:
-            self._clear_effect_buffers_unlocked()
+            self._pending_clear = True
 
     def _init_states(self):
         sr = self.sr
@@ -457,26 +457,32 @@ class RealTimeDSPEngine:
             if self._eq_dirty:
                 self._eq_sos = build_eq_sos(p, self.sr)
                 self._eq_dirty = False
+            if self._pending_clear:
+                self._clear_effect_buffers_unlocked()
+                self._pending_clear = False
+                self._was_bypass = bool(p.bypass)
 
-        # Medidor de entrada (pré-efeitos)
-        in_db = self._peak_db(x)
-        self.input_peak_db = 0.65 * self.input_peak_db + 0.35 * in_db
+            # Medidor de entrada (pré-efeitos)
+            in_db = self._peak_db(x)
+            self.input_peak_db = 0.65 * self.input_peak_db + 0.35 * in_db
 
-        if p.bypass:
-            if not self._was_bypass:
-                with self._lock:
+            if p.bypass:
+                if not self._was_bypass:
                     self._clear_effect_buffers_unlocked()
                     self._was_bypass = True
-            self.output_peak_db = self.input_peak_db
-            self.gate_is_open = True
-            self._update_waveform(x)
-            return x
+                self.output_peak_db = self.input_peak_db
+                self.gate_is_open = True
+                self._update_waveform(x)
+                return x
 
-        if self._was_bypass:
-            with self._lock:
+            if self._was_bypass:
                 self._clear_effect_buffers_unlocked()
                 self._was_bypass = False
 
+            return self._process_chain_unlocked(x, p)
+
+    def _process_chain_unlocked(self, x: np.ndarray, p: DSPParams) -> np.ndarray:
+        n = len(x)
         # 1. Ganho de Entrada
         if abs(p.input_gain_db) > 0.05:
             x *= 10.0 ** (p.input_gain_db / 20.0)

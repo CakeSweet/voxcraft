@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VoxCraft Studio — Modulador de Voz em Tempo Real e Estúdio DSP</title>
+  <title>VoxCraft Studio</title>
   <meta name="description" content="Modulador de voz nativo em tempo real com 24 presets, cadeia DSP completa, latência baixa para Discord/OBS e pacotes para Windows e Linux." />
-  <meta property="og:title" content="VoxCraft Studio — Modulador de Voz em Tempo Real" />
+  <meta property="og:title" content="VoxCraft Studio" />
   <meta property="og:description" content="Estúdio DSP nativo com Pitch Shifter, Vocoder, EQ Paramétrico de 5 Bandas, Compressor, Reverb e roteamento direto para Discord e OBS." />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="assets/voxcraft.png" />
@@ -26,7 +26,6 @@
       </a>
 
       <nav class="nav-links" aria-label="Navegação principal">
-        <a href="#studio" data-i18n="nav_studio">Estúdio</a>
         <a href="#pipeline" data-i18n="nav_pipeline">Cadeia DSP</a>
         <a href="#presets" data-i18n="nav_presets">Presets</a>
         <a href="#download" data-i18n="nav_download">Download</a>
@@ -43,7 +42,6 @@
     </div>
 
     <div class="mobile-drawer" id="mobileDrawer" hidden>
-      <a href="#studio" data-i18n="nav_studio">Estúdio</a>
       <a href="#pipeline" data-i18n="nav_pipeline">Cadeia DSP</a>
       <a href="#presets" data-i18n="nav_presets">Presets</a>
       <a href="#download" data-i18n="nav_download">Download</a>
@@ -72,7 +70,7 @@
 
           <div class="hero-actions">
             <a href="#download" class="btn btn-primary" data-i18n="hero_primary_cta">Baixar VoxCraft Studio</a>
-            <a href="#studio" class="btn btn-secondary" data-i18n="hero_secondary_cta">Explorar Painel DSP</a>
+            <a href="#pipeline" class="btn btn-secondary" data-i18n="hero_secondary_cta">Explorar Cadeia DSP</a>
           </div>
 
           <dl class="hero-specs">
@@ -108,135 +106,10 @@
       </div>
     </section>
 
-    <section class="studio-section section" id="studio">
-      <div class="container">
-        <div class="section-head studio-head">
-          <div>
-            <p class="section-kicker" data-i18n="studio_kicker">01. Prévia Interativa do Estúdio</p>
-            <h2 class="section-title" data-i18n="studio_title">Mesma paleta, mesmos efeitos, antes mesmo de instalar.</h2>
-          </div>
-
-          <div class="studio-prefs" aria-label="Preferências de tema e idioma">
-            <div class="segmented" role="group" aria-label="Tema visual">
-              <button type="button" class="seg-btn active" data-theme-choice="dark">Dark</button>
-              <button type="button" class="seg-btn" data-theme-choice="oled">OLED</button>
-              <button type="button" class="seg-btn" data-theme-choice="light">Light</button>
-            </div>
-            <div class="segmented" role="group" aria-label="Idioma da página">
-              <button type="button" class="seg-btn active" data-lang-choice="pt">PT</button>
-              <button type="button" class="seg-btn" data-lang-choice="en">EN</button>
-              <button type="button" class="seg-btn" data-lang-choice="es">ES</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="workbench" role="region" aria-label="Simulador visual do VoxCraft Studio">
-          <div class="workbench-top">
-            <div class="wb-brand">
-              <img src="assets/voxcraft.png" alt="" width="20" height="20" referrerpolicy="no-referrer" />
-              <span>VoxCraft Studio</span>
-            </div>
-
-            <div class="wb-preset-wrap">
-              <label for="wbPresetSelect" data-i18n="wb_preset_label">Preset:</label>
-              <select id="wbPresetSelect" class="wb-select" aria-label="Selecionar preset de voz"></select>
-            </div>
-
-            <div class="wb-actions">
-              <button type="button" class="wb-toggle" id="wbBypassBtn" aria-pressed="false">
-                <span data-i18n="wb_bypass">Voz Original</span>
-              </button>
-              <button type="button" class="btn btn-primary btn-sm" id="wbPowerBtn" aria-pressed="true" data-i18n="wb_audio_active">
-                Áudio Ativo
-              </button>
-            </div>
-          </div>
-
-          <div class="workbench-body">
-            <aside class="wb-sidebar">
-              <div class="wb-group">
-                <h3 data-i18n="wb_routing_title">Roteamento de Áudio</h3>
-                <div class="wb-field">
-                  <span class="wb-field-label" data-i18n="wb_mic_label">Microfone (Entrada)</span>
-                  <div class="wb-readonly mono">[WASAPI] Studio USB Mic</div>
-                </div>
-                <div class="wb-field">
-                  <span class="wb-field-label" data-i18n="wb_out_label">Saída Processada</span>
-                  <div class="wb-readonly mono">[WASAPI] CABLE Input (VB-Audio)</div>
-                </div>
-                <div class="wb-route-meta mono tabular" id="wbStatusText">
-                  Ativo: 48000 Hz | Bloco 512 (~10.7 ms)
-                </div>
-              </div>
-
-              <div class="wb-group">
-                <h3 data-i18n="wb_active_chain">Módulos Ativos</h3>
-                <ul class="chain-list" id="wbChainList"></ul>
-              </div>
-            </aside>
-
-            <div class="wb-main">
-              <div class="wb-controls-grid">
-                <div class="slider-box">
-                  <div class="slider-head">
-                    <label for="sliderPitch" data-i18n="ctl_pitch">Pitch (Semitons)</label>
-                    <span class="mono tabular" id="valPitch">0.0 st</span>
-                  </div>
-                  <input id="sliderPitch" type="range" min="-12" max="12" step="0.5" value="0" />
-                </div>
-
-                <div class="slider-box">
-                  <div class="slider-head">
-                    <label for="sliderHpf" data-i18n="ctl_hpf">Corte de Graves (HPF)</label>
-                    <span class="mono tabular" id="valHpf">80 Hz</span>
-                  </div>
-                  <input id="sliderHpf" type="range" min="20" max="400" step="5" value="80" />
-                </div>
-
-                <div class="slider-box">
-                  <div class="slider-head">
-                    <label for="sliderPresence" data-i18n="ctl_presence">Presença Vocal (3 kHz)</label>
-                    <span class="mono tabular" id="valPresence">+1.5 dB</span>
-                  </div>
-                  <input id="sliderPresence" type="range" min="-12" max="12" step="0.5" value="1.5" />
-                </div>
-
-                <div class="slider-box">
-                  <div class="slider-head">
-                    <label for="sliderReverb" data-i18n="ctl_reverb">Espaço / Reverb Mix</label>
-                    <span class="mono tabular" id="valReverb">0%</span>
-                  </div>
-                  <input id="sliderReverb" type="range" min="0" max="100" step="1" value="0" />
-                </div>
-              </div>
-
-              <div class="canvas-grid">
-                <div class="canvas-panel">
-                  <div class="canvas-head">
-                    <span data-i18n="canvas_eq_title">Curva de Equalização (20 Hz – 20 kHz)</span>
-                    <span class="mono tabular" id="eqPeakBadge">HPF 80 Hz</span>
-                  </div>
-                  <canvas id="eqCanvas" width="560" height="190" data-testid="eq-canvas"></canvas>
-                </div>
-
-                <div class="canvas-panel">
-                  <div class="canvas-head">
-                    <span data-i18n="canvas_wave_title">Osciloscópio de Saída</span>
-                    <span class="mono tabular" id="waveModeBadge">DSP</span>
-                  </div>
-                  <canvas id="waveCanvas" width="320" height="190" data-testid="wave-canvas"></canvas>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <section class="section" id="pipeline">
       <div class="container">
         <div class="section-head">
-          <p class="section-kicker" data-i18n="pipe_kicker">02. Arquitetura de Áudio</p>
+          <p class="section-kicker" data-i18n="pipe_kicker">01. Arquitetura de Áudio</p>
           <h2 class="section-title" data-i18n="pipe_title">Projetado para voz limpa, baixa latência e controle total no desktop.</h2>
         </div>
 
@@ -260,7 +133,7 @@
             <span class="feature-index mono">02</span>
             <h3 data-i18n="feat_2_title">Atalho Global Instantâneo</h3>
             <p data-i18n="feat_2_desc">
-              Alterne entre voz modificada e voz natural com uma tecla (ex: F9 ou botões laterais do mouse) no modo Alternar ou Segurar para falar com efeito, sem cortes ou áudio preso ao soltar.
+              Alterne entre voz modificada e voz natural com uma tecla ou botão lateral do mouse (como F9) no modo Alternar ou Segurar.
             </p>
           </article>
 
@@ -268,15 +141,7 @@
             <span class="feature-index mono">03</span>
             <h3 data-i18n="feat_3_title">Roteamento para Discord, OBS e Jogos</h3>
             <p data-i18n="feat_3_desc">
-              Envie sua voz processada para o VB-Cable no Windows ou sink virtual no Linux com monitoramento local separado nos seus fones e fallback automático de APIs (WASAPI, DirectSound e MME).
-            </p>
-          </article>
-
-          <article class="feature-card span-2">
-            <span class="feature-index mono">04</span>
-            <h3 data-i18n="feat_4_title">Experiência nativa no Windows e no Linux</h3>
-            <p data-i18n="feat_4_desc">
-              Suporte a instância única, inicialização automática com o sistema, bandeja do sistema, barra de janela personalizada no Linux (com Minimizar, Maximizar/Restaurar e Fechar) e atualizador integrado por releases versionadas no GitHub.
+              Envie sua voz processada para o VB-Cable no Windows ou sink virtual no Linux com monitoramento local separado nos seus fones via WASAPI, DirectSound e MME.
             </p>
           </article>
         </div>
@@ -286,7 +151,7 @@
     <section class="section" id="presets">
       <div class="container">
         <div class="section-head">
-          <p class="section-kicker" data-i18n="presets_kicker">03. Biblioteca Nativa</p>
+          <p class="section-kicker" data-i18n="presets_kicker">02. Biblioteca Nativa</p>
           <h2 class="section-title" data-i18n="presets_title">24 presets prontos de fábrica e vozes personalizadas ilimitadas.</h2>
         </div>
 
@@ -298,7 +163,7 @@
       <div class="container">
         <div class="download-layout">
           <div class="download-intro">
-            <p class="section-kicker" data-i18n="dl_kicker">04. Instalação e Releases</p>
+            <p class="section-kicker" data-i18n="dl_kicker">03. Instalação e Releases</p>
             <h2 class="section-title" data-i18n="dl_title">Baixe a versão mais recente para o seu sistema.</h2>
             <p class="download-lead" data-i18n="dl_lead">
               Cada release no GitHub publica instaladores versionados para Windows e pacotes nativos .deb e .rpm para distribuições Linux.
@@ -348,10 +213,25 @@
         <span class="footer-copy" data-i18n="footer_note">Modulador de voz desktop nativo em Python</span>
       </div>
 
-      <div class="footer-links">
-        <a href="https://github.com/CakeSweet/voxcraft" target="_blank" rel="noopener noreferrer">GitHub</a>
-        <a href="https://github.com/CakeSweet/voxcraft/releases" target="_blank" rel="noopener noreferrer">Releases</a>
-        <a href="https://github.com/CakeSweet/voxcraft/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      <div class="footer-controls">
+        <div class="studio-prefs" aria-label="Preferências de tema e idioma">
+          <div class="segmented" role="group" aria-label="Tema visual">
+            <button type="button" class="seg-btn active" data-theme-choice="dark">Dark</button>
+            <button type="button" class="seg-btn" data-theme-choice="oled">OLED</button>
+            <button type="button" class="seg-btn" data-theme-choice="light">Light</button>
+          </div>
+          <div class="segmented" role="group" aria-label="Idioma da página">
+            <button type="button" class="seg-btn active" data-lang-choice="pt">PT</button>
+            <button type="button" class="seg-btn" data-lang-choice="en">EN</button>
+            <button type="button" class="seg-btn" data-lang-choice="es">ES</button>
+          </div>
+        </div>
+
+        <div class="footer-links">
+          <a href="https://github.com/CakeSweet/voxcraft" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/CakeSweet/voxcraft/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+          <a href="https://github.com/CakeSweet/voxcraft/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+        </div>
       </div>
     </div>
   </footer>
