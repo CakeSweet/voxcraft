@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import ctypes.util
 from dataclasses import asdict
 import io
 import json
@@ -45,6 +46,7 @@ GITHUB_REPO = "CakeSweet/voxcraft"
 APP_VERSION = "2.1.0"
 
 IS_FROZEN = bool(getattr(sys, "frozen", False))
+IS_LINUX = sys.platform.startswith("linux")
 BASE_DIR = os.path.dirname(os.path.abspath(sys.executable if IS_FROZEN else __file__))
 ASSETS_DIR = os.path.join(getattr(sys, "_MEIPASS", BASE_DIR), "assets")
 ICON_ICO_PATH = os.path.join(ASSETS_DIR, "voxcraft.ico")
@@ -284,13 +286,13 @@ def _load_runtime_modules():
     try:
         import pystray as _pystray
         pystray = _pystray
-    except ImportError:
+    except Exception:
         pystray = None
 
     try:
         from pynput import keyboard as _pynput_kb
         pynput_kb = _pynput_kb
-    except ImportError:
+    except Exception:
         pynput_kb = None
 
     from dsp_engine import DSPParams as _DSPParams, RealTimeDSPEngine as _RealTimeDSPEngine, build_eq_sos as _build_eq_sos
@@ -343,6 +345,203 @@ def _load_or_create_pil_icon():
     return img
 
 
+_X11_LIB = None
+_X11_INIT_TRIED = False
+
+
+def _get_x11_lib():
+    global _X11_LIB, _X11_INIT_TRIED
+    if not IS_LINUX:
+        return None
+    if _X11_INIT_TRIED:
+        return _X11_LIB
+    _X11_INIT_TRIED = True
+    candidates = []
+    found = ctypes.util.find_library("X11")
+    if found:
+        candidates.append(found)
+    candidates.extend(["libX11.so.6", "libX11.so"])
+    for lib_name in candidates:
+        try:
+            lib = ctypes.CDLL(lib_name)
+            lib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            lib.XOpenDisplay.restype = ctypes.c_void_p
+            lib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+            lib.XCloseDisplay.restype = ctypes.c_int
+            lib.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+            lib.XDefaultRootWindow.restype = ctypes.c_ulong
+            lib.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+            lib.XInternAtom.restype = ctypes.c_ulong
+            lib.XChangeProperty.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_ulong,
+                ctypes.c_ulong,
+                ctypes.c_ulong,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_void_p,
+                ctypes.c_int,
+            ]
+            lib.XChangeProperty.restype = ctypes.c_int
+            lib.XGetWindowProperty.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_ulong,
+                ctypes.c_ulong,
+                ctypes.c_long,
+                ctypes.c_long,
+                ctypes.c_int,
+                ctypes.c_ulong,
+                ctypes.POINTER(ctypes.c_ulong),
+                ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_ulong),
+                ctypes.POINTER(ctypes.c_ulong),
+                ctypes.POINTER(ctypes.c_void_p),
+            ]
+            lib.XGetWindowProperty.restype = ctypes.c_int
+            lib.XFree.argtypes = [ctypes.c_void_p]
+            lib.XFree.restype = ctypes.c_int
+            lib.XFlush.argtypes = [ctypes.c_void_p]
+            lib.XFlush.restype = ctypes.c_int
+            lib.XGetSelectionOwner.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+            lib.XGetSelectionOwner.restype = ctypes.c_ulong
+            _X11_LIB = lib
+            break
+        except Exception:
+            continue
+    return _X11_LIB
+
+
+def _has_x11_systray_owner() -> bool:
+    if not IS_LINUX:
+        return True
+    lib = _get_x11_lib()
+    if lib is None:
+        return False
+    dpy = lib.XOpenDisplay(None)
+    if not dpy:
+        return False
+    try:
+        atom = lib.XInternAtom(dpy, b"_NET_SYSTEM_TRAY_S0", True)
+        if not atom:
+            return False
+        owner = lib.XGetSelectionOwner(dpy, atom)
+        return bool(owner)
+    except Exception:
+        return False
+    finally:
+        try:
+            lib.XCloseDisplay(dpy)
+        except Exception:
+            pass
+
+
+def _set_x11_motif_borderless(window_id: int) -> bool:
+    if not IS_LINUX or not window_id:
+        return False
+    lib = _get_x11_lib()
+    if lib is None:
+        return False
+    dpy = lib.XOpenDisplay(None)
+    if not dpy:
+        return False
+    try:
+        atom = lib.XInternAtom(dpy, b"_MOTIF_WM_HINTS", False)
+        if not atom:
+            return False
+        # PropMotifWmHints: flags=2 (MWM_HINTS_DECORATIONS), decorations=0
+        hints = (ctypes.c_ulong * 5)(2, 0, 0, 0, 0)
+        lib.XChangeProperty(dpy, ctypes.c_ulong(window_id), atom, atom, 32, 0, ctypes.byref(hints), 5)
+        lib.XFlush(dpy)
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            lib.XCloseDisplay(dpy)
+        except Exception:
+            pass
+
+
+def _get_linux_workarea(widget) -> tuple[int, int, int, int]:
+    scr_w = max(800, int(widget.winfo_screenwidth()))
+    scr_h = max(600, int(widget.winfo_screenheight()))
+    fallback = (0, 0, scr_w, max(560, scr_h - 36))
+    if not IS_LINUX:
+        return fallback
+    lib = _get_x11_lib()
+    if lib is None:
+        return fallback
+    dpy = lib.XOpenDisplay(None)
+    if not dpy:
+        return fallback
+    prop_ptr = ctypes.c_void_p()
+    try:
+        root_win = lib.XDefaultRootWindow(dpy)
+        atom_wa = lib.XInternAtom(dpy, b"_NET_WORKAREA", True)
+        if not atom_wa:
+            return fallback
+        actual_type = ctypes.c_ulong()
+        actual_fmt = ctypes.c_int()
+        nitems = ctypes.c_ulong()
+        bytes_after = ctypes.c_ulong()
+        rc = lib.XGetWindowProperty(
+            dpy,
+            root_win,
+            atom_wa,
+            0,
+            4,
+            False,
+            6,  # XA_CARDINAL
+            ctypes.byref(actual_type),
+            ctypes.byref(actual_fmt),
+            ctypes.byref(nitems),
+            ctypes.byref(bytes_after),
+            ctypes.byref(prop_ptr),
+        )
+        if rc == 0 and prop_ptr.value and nitems.value >= 4 and actual_fmt.value == 32:
+            vals = ctypes.cast(prop_ptr.value, ctypes.POINTER(ctypes.c_ulong))
+            wx, wy, ww, wh = int(vals[0]), int(vals[1]), int(vals[2]), int(vals[3])
+            if ww >= 640 and wh >= 480:
+                return (wx, wy, ww, wh)
+    except Exception:
+        pass
+    finally:
+        if prop_ptr.value:
+            try:
+                lib.XFree(prop_ptr)
+            except Exception:
+                pass
+        try:
+            lib.XCloseDisplay(dpy)
+        except Exception:
+            pass
+    return fallback
+
+
+def _make_win_ctrl_icon(kind: str, color: str):
+    if Image is None or ImageDraw is None:
+        return None
+    try:
+        size = 24
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        if kind == "min":
+            draw.line((4, 13, 19, 13), fill=color, width=2)
+        elif kind == "max":
+            draw.rectangle((4, 4, 19, 19), outline=color, width=2)
+        elif kind == "restore":
+            draw.rectangle((8, 4, 19, 15), outline=color, width=2)
+            draw.rectangle((4, 8, 15, 19), fill=(0, 0, 0, 0), outline=color, width=2)
+            draw.line((8, 8, 15, 8), fill=color, width=2)
+            draw.line((15, 8, 15, 15), fill=color, width=2)
+        elif kind == "close":
+            draw.line((5, 5, 18, 18), fill=color, width=2)
+            draw.line((18, 5, 5, 18), fill=color, width=2)
+        return ctk.CTkImage(light_image=img, dark_image=img, size=(12, 12))
+    except Exception:
+        return None
+
+
 class VoxCraftApp(ctk.CTk):
     def __init__(self):
         _enable_windows_taskbar_icon_id()
@@ -352,10 +551,20 @@ class VoxCraftApp(ctk.CTk):
         self._splash_icon_photo = None
         self._tray_icon = None
         self._tray_thread = None
+        self._tray_failed = False
         self._is_quitting = False
         self._is_loaded = False
         self._rebuilding_ui = False
         self._ui_loop_job = None
+        self._is_maximized = False
+        self._restore_geometry = ""
+        self._linux_overrideredirect = False
+        self._drag_origin: tuple[int, int, int, int] | None = None
+        self._resize_origin: tuple[int, int, int, int, int, int] | None = None
+        self._linux_titlebar = None
+        self._linux_titlebar_sep = None
+        self._linux_max_btn = None
+        self._linux_ctrl_icons: dict[tuple[str, str], object] = {}
         self.ui_theme: str = _INIT_THEME
         self.ui_lang: str = _INIT_LANG
         self._i18n_hooks: list = []
@@ -409,6 +618,9 @@ class VoxCraftApp(ctk.CTk):
         self.geometry(f"{sw_w}x{sw_h}+{(scr_w - sw_w) // 2}+{(scr_h - sw_h) // 2}")
         self.resizable(False, False)
         self._apply_window_icon()
+        if IS_LINUX:
+            self.update_idletasks()
+            self._apply_linux_window_chrome()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._splash_disp = 0.05
@@ -841,7 +1053,17 @@ class VoxCraftApp(ctk.CTk):
             self._hotkey_enabled_cached: bool = True
             self._hotkey_hold_cached: bool = False
 
-            self.main_container = ctk.CTkFrame(self, fg_color="transparent")
+            if IS_LINUX:
+                th_main = self._c()
+                self.main_container = ctk.CTkFrame(
+                    self,
+                    fg_color=th_main["window_bg"],
+                    border_width=1,
+                    border_color=th_main["panel_border"],
+                    corner_radius=0,
+                )
+            else:
+                self.main_container = ctk.CTkFrame(self, fg_color="transparent")
             self._build_layout()
         except Exception as exc:
             messagebox.showerror(self._t("boot_err_title"), self._t("boot_err_ui", err=exc))
@@ -926,14 +1148,25 @@ class VoxCraftApp(ctk.CTk):
         self.main_container.pack(fill="both", expand=True)
         self.update_idletasks()
         self._apply_window_icon()
+        if IS_LINUX:
+            self._apply_linux_window_chrome()
         self._start_tray_icon()
         self._start_hotkey_listener()
         self.bind("<Map>", self._on_window_map)
+        self.bind("<Control-q>", lambda _e: self._quit_app())
         self._schedule_ui_loop()
 
     def _on_window_map(self, event=None):
         if event is not None and event.widget is not self:
             return
+        if IS_LINUX:
+            try:
+                if self._linux_overrideredirect:
+                    self.overrideredirect(True)
+                else:
+                    self._apply_linux_window_chrome()
+            except Exception:
+                pass
         self._last_ui_hidden = True
         self._last_in_norm = -1.0
         self._last_out_norm = -1.0
@@ -1047,8 +1280,19 @@ class VoxCraftApp(ctk.CTk):
             pystray.MenuItem(self._t("tray_quit"), on_quit),
         )
 
-        self._tray_icon = pystray.Icon("voxcraft", pil_img, "VoxCraft Studio", menu)
-        self._tray_thread = threading.Thread(target=self._tray_icon.run, daemon=True)
+        icon_obj = pystray.Icon("voxcraft", pil_img, "VoxCraft Studio", menu)
+        self._tray_icon = icon_obj
+        self._tray_failed = False
+
+        def _run_tray():
+            try:
+                icon_obj.run()
+            except Exception:
+                self._tray_failed = True
+                if self._tray_icon is icon_obj:
+                    self._tray_icon = None
+
+        self._tray_thread = threading.Thread(target=_run_tray, daemon=True)
         self._tray_thread.start()
 
     def _restart_tray_icon(self):
@@ -1084,6 +1328,329 @@ class VoxCraftApp(ctk.CTk):
                 pass
 
     # ------------------------------------------------------------------ #
+    # Barra de Janela Personalizada para Linux (estilo Windows)
+    # ------------------------------------------------------------------ #
+    def _apply_linux_window_chrome(self):
+        if not IS_LINUX:
+            return
+        try:
+            xid = int(self.winfo_id())
+        except Exception:
+            xid = 0
+        if _set_x11_motif_borderless(xid):
+            self._linux_overrideredirect = False
+            try:
+                if bool(self.overrideredirect()):
+                    self.overrideredirect(False)
+            except Exception:
+                pass
+        else:
+            self._linux_overrideredirect = True
+            try:
+                self.overrideredirect(True)
+            except Exception:
+                pass
+
+    def _minimize_window_to_taskbar(self):
+        if self._is_quitting:
+            return
+        if IS_LINUX and self._linux_overrideredirect:
+            try:
+                self.overrideredirect(False)
+            except Exception:
+                pass
+        try:
+            self.iconify()
+        except Exception:
+            self._minimize_to_tray()
+
+    def _update_linux_max_btn(self):
+        btn = getattr(self, "_linux_max_btn", None)
+        if btn is None:
+            return
+        th = self._c()
+        kind = "restore" if self._is_maximized else "max"
+        ico = self._get_win_ctrl_icon(kind, th["text_primary"])
+        if ico is not None:
+            btn.configure(image=ico, text="")
+        else:
+            btn.configure(image=None, text="❐" if self._is_maximized else "□")
+
+    def _toggle_maximize_window(self):
+        if self._is_quitting:
+            return
+        if self._is_maximized:
+            self._is_maximized = False
+            try:
+                self.attributes("-zoomed", False)
+            except Exception:
+                pass
+            if self._restore_geometry:
+                try:
+                    self.geometry(self._restore_geometry)
+                except Exception:
+                    pass
+        else:
+            try:
+                self._restore_geometry = self.geometry()
+            except Exception:
+                self._restore_geometry = "1220x780+80+60"
+            wx, wy, ww, wh = _get_linux_workarea(self)
+            self._is_maximized = True
+            try:
+                self.geometry(f"{ww}x{wh}+{wx}+{wy}")
+            except Exception:
+                pass
+        self._update_linux_max_btn()
+        if IS_LINUX:
+            self.after(20, self._apply_linux_window_chrome)
+
+    def _get_win_ctrl_icon(self, kind: str, color: str):
+        key = (kind, color)
+        if key not in self._linux_ctrl_icons:
+            self._linux_ctrl_icons[key] = _make_win_ctrl_icon(kind, color)
+        return self._linux_ctrl_icons[key]
+
+    def _build_linux_titlebar(self, root):
+        th = self._c()
+        bar = ctk.CTkFrame(root, height=34, corner_radius=0, fg_color=th["panel_bg"], border_width=0)
+        bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+        bar.pack_propagate(False)
+        self._linux_titlebar = bar
+        self._reg_theme(bar, lambda t, wd=bar: wd.configure(fg_color=t["panel_bg"]))
+
+        sep = ctk.CTkFrame(root, height=1, corner_radius=0, fg_color=th["panel_border"], border_width=0)
+        sep.pack(side="top", fill="x", padx=1)
+        self._linux_titlebar_sep = sep
+        self._reg_theme(sep, lambda t, wd=sep: wd.configure(fg_color=t["panel_border"]))
+
+        left_box = ctk.CTkFrame(bar, fg_color="transparent")
+        left_box.pack(side="left", fill="y", padx=(10, 8))
+
+        pil_img = _load_or_create_pil_icon()
+        if pil_img is not None:
+            try:
+                bar_ico = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(18, 18))
+                self._linux_bar_icon_ref = bar_ico
+                ico_lbl = ctk.CTkLabel(left_box, image=bar_ico, text="")
+                ico_lbl.pack(side="left", padx=(0, 8))
+            except Exception:
+                ico_lbl = None
+        else:
+            ico_lbl = None
+
+        title_lbl = self._lbl(left_box, "VoxCraft Studio", font_key="sm_b", color_role="text_primary", is_key=False)
+        title_lbl.pack(side="left")
+
+        local_id = self._get_local_build_identity()
+        ver_lbl = self._lbl(left_box, f"v{local_id['version']}", font_key="xs", color_role="text_subtle", is_key=False)
+        ver_lbl.pack(side="left", padx=(6, 0), pady=(1, 0))
+
+        # Botões estilo Windows à direita: Minimizar, Maximizar/Restaurar, Fechar
+        ctrl_box = ctk.CTkFrame(bar, fg_color="transparent")
+        ctrl_box.pack(side="right", fill="y")
+
+        ico_min = self._get_win_ctrl_icon("min", th["text_primary"])
+        min_btn = ctk.CTkButton(
+            ctrl_box,
+            text="" if ico_min is not None else "─",
+            image=ico_min,
+            width=44,
+            height=34,
+            corner_radius=0,
+            fg_color="transparent",
+            hover_color=th["control_hover"],
+            text_color=th["text_primary"],
+            command=self._minimize_window_to_taskbar,
+        )
+        min_btn.pack(side="left", fill="y")
+
+        ico_max = self._get_win_ctrl_icon("max", th["text_primary"])
+        max_btn = ctk.CTkButton(
+            ctrl_box,
+            text="" if ico_max is not None else "□",
+            image=ico_max,
+            width=44,
+            height=34,
+            corner_radius=0,
+            fg_color="transparent",
+            hover_color=th["control_hover"],
+            text_color=th["text_primary"],
+            command=self._toggle_maximize_window,
+        )
+        max_btn.pack(side="left", fill="y")
+        self._linux_max_btn = max_btn
+
+        ico_close = self._get_win_ctrl_icon("close", th["text_primary"])
+        ico_close_hover = self._get_win_ctrl_icon("close", "#ffffff")
+        close_btn = ctk.CTkButton(
+            ctrl_box,
+            text="" if ico_close is not None else "×",
+            image=ico_close,
+            width=46,
+            height=34,
+            corner_radius=0,
+            fg_color="transparent",
+            hover_color="#e81123",
+            text_color=th["text_primary"],
+            command=self._on_close,
+        )
+        close_btn.pack(side="left", fill="y")
+
+        if ico_close_hover is not None:
+            close_btn.bind(
+                "<Enter>",
+                lambda _e, b=close_btn, im=ico_close_hover: b.configure(image=im, text_color="#ffffff"),
+                add="+",
+            )
+            close_btn.bind(
+                "<Leave>",
+                lambda _e, b=close_btn: b.configure(
+                    image=self._get_win_ctrl_icon("close", self._c()["text_primary"]),
+                    text_color=self._c()["text_primary"],
+                ),
+                add="+",
+            )
+
+        def _retheme_win_btns(t):
+            ic_min = self._get_win_ctrl_icon("min", t["text_primary"])
+            min_btn.configure(
+                hover_color=t["control_hover"],
+                text_color=t["text_primary"],
+                image=ic_min,
+                text="" if ic_min is not None else "─",
+            )
+            ic_max = self._get_win_ctrl_icon("restore" if self._is_maximized else "max", t["text_primary"])
+            max_btn.configure(
+                hover_color=t["control_hover"],
+                text_color=t["text_primary"],
+                image=ic_max,
+                text="" if ic_max is not None else ("❐" if self._is_maximized else "□"),
+            )
+            ic_cls = self._get_win_ctrl_icon("close", t["text_primary"])
+            close_btn.configure(
+                text_color=t["text_primary"],
+                image=ic_cls,
+                text="" if ic_cls is not None else "×",
+            )
+
+        self._reg_theme(ctrl_box, _retheme_win_btns)
+
+        # Menu de contexto (botão direito na barra)
+        def _show_title_menu(event):
+            t = self._c()
+            ctx = tk.Menu(
+                self,
+                tearoff=0,
+                bg=t["dropdown_bg"],
+                fg=t["dropdown_text"],
+                activebackground=t["accent_deep"],
+                activeforeground="#ffffff",
+                bd=1,
+            )
+            ctx.add_command(
+                label=self._t("win_restore" if self._is_maximized else "win_maximize"),
+                command=self._toggle_maximize_window,
+            )
+            ctx.add_command(label=self._t("win_minimize"), command=self._minimize_window_to_taskbar)
+            ctx.add_separator()
+            ctx.add_command(label=self._t("win_close"), command=self._on_close)
+            ctx.add_command(label=self._t("win_quit_app"), command=self._quit_app)
+            try:
+                ctx.tk_popup(event.x_root, event.y_root)
+            finally:
+                try:
+                    ctx.grab_release()
+                except Exception:
+                    pass
+
+        # Arrastar para mover e duplo clique para maximizar/restaurar
+        def _start_drag(event):
+            self._drag_origin = (event.x_root, event.y_root, self.winfo_x(), self.winfo_y())
+
+        def _do_drag(event):
+            if self._drag_origin is None:
+                return
+            sx, sy, wx, wy = self._drag_origin
+            dx = event.x_root - sx
+            dy = event.y_root - sy
+            if self._is_maximized:
+                if abs(dx) < 6 and abs(dy) < 6:
+                    return
+                cur_w = max(1, self.winfo_width())
+                ratio = max(0.15, min(0.85, (event.x_root - self.winfo_x()) / float(cur_w)))
+                rw, rh = 1220, 780
+                if self._restore_geometry:
+                    try:
+                        size_part = self._restore_geometry.split("+", 1)[0]
+                        rw_s, rh_s = size_part.split("x", 1)
+                        rw, rh = max(1060, int(rw_s)), max(680, int(rh_s))
+                    except Exception:
+                        pass
+                self._is_maximized = False
+                self._update_linux_max_btn()
+                nx = int(event.x_root - rw * ratio)
+                ny = max(0, int(event.y_root - 17))
+                self.geometry(f"{rw}x{rh}+{nx}+{ny}")
+                self._drag_origin = (event.x_root, event.y_root, nx, ny)
+                return
+            self.geometry(f"+{wx + dx}+{wy + dy}")
+
+        def _end_drag(_event):
+            self._drag_origin = None
+
+        drag_targets = [w for w in (bar, left_box, ico_lbl, title_lbl, ver_lbl) if w is not None]
+        for w in drag_targets:
+            w.bind("<ButtonPress-1>", _start_drag, add="+")
+            w.bind("<B1-Motion>", _do_drag, add="+")
+            w.bind("<ButtonRelease-1>", _end_drag, add="+")
+            w.bind("<Double-Button-1>", lambda _e: self._toggle_maximize_window(), add="+")
+            w.bind("<Button-3>", _show_title_menu, add="+")
+
+    def _build_linux_resize_grip(self, root):
+        th = self._c()
+        grip = tk.Label(
+            root,
+            text="◢",
+            bg=th["window_bg"],
+            fg=th["text_subtle"],
+            font=("TkDefaultFont", 8),
+            cursor="bottom_right_corner",
+            bd=0,
+            padx=2,
+            pady=0,
+        )
+        grip.place(relx=1.0, rely=1.0, x=-2, y=-2, anchor="se")
+        self._reg_theme(grip, lambda t, wd=grip: wd.configure(bg=t["window_bg"], fg=t["text_subtle"]))
+
+        def _start_resize(event):
+            if self._is_maximized:
+                return
+            self._resize_origin = (
+                event.x_root,
+                event.y_root,
+                self.winfo_width(),
+                self.winfo_height(),
+                self.winfo_x(),
+                self.winfo_y(),
+            )
+
+        def _do_resize(event):
+            if self._resize_origin is None or self._is_maximized:
+                return
+            sx, sy, sw, sh, wx, wy = self._resize_origin
+            nw = max(1060, sw + (event.x_root - sx))
+            nh = max(680, sh + (event.y_root - sy))
+            self.geometry(f"{nw}x{nh}+{wx}+{wy}")
+
+        def _end_resize(_event):
+            self._resize_origin = None
+
+        grip.bind("<ButtonPress-1>", _start_resize)
+        grip.bind("<B1-Motion>", _do_resize)
+        grip.bind("<ButtonRelease-1>", _end_resize)
+
+    # ------------------------------------------------------------------ #
     # Construção da Interface
     # ------------------------------------------------------------------ #
     def _build_layout(self):
@@ -1091,14 +1658,22 @@ class VoxCraftApp(ctk.CTk):
         th = self._c()
         self._i18n_hooks = []
         self._theme_hooks = []
-        self._transparent_containers = [root]
+        if IS_LINUX:
+            self._transparent_containers = []
+            self._reg_theme(
+                root,
+                lambda t, wd=root: wd.configure(fg_color=t["window_bg"], border_color=t["panel_border"]),
+            )
+            self._build_linux_titlebar(root)
+        else:
+            self._transparent_containers = [root]
         self._tab_frames = {}
         self._tab_buttons = {}
         self._active_tab_key = "tab_pitch"
 
         # Barra Superior
         topbar = self._card(root, role="panel", height=62, corner_radius=14)
-        topbar.pack(fill="x", padx=14, pady=(12, 8))
+        topbar.pack(fill="x", padx=14, pady=(10 if IS_LINUX else 12, 8))
         topbar.pack_propagate(False)
 
         title_box = ctk.CTkFrame(topbar, fg_color="transparent")
@@ -1209,6 +1784,8 @@ class VoxCraftApp(ctk.CTk):
 
         self._build_sidebar(body)
         self._build_workbench(body)
+        if IS_LINUX:
+            self._build_linux_resize_grip(root)
 
     def _build_sidebar(self, parent):
         th = self._c()
@@ -1279,7 +1856,7 @@ class VoxCraftApp(ctk.CTk):
         )
         self.latency_menu.pack(side="right")
 
-        self.minimize_to_tray_var = ctk.BooleanVar(value=pystray is not None)
+        self.minimize_to_tray_var = ctk.BooleanVar(value=(pystray is not None) or IS_LINUX)
         self._switch(route_card, "minimize_tray", self.minimize_to_tray_var, self._save_config).pack(
             anchor="w", padx=12, pady=(2, 8)
         )
@@ -2188,7 +2765,7 @@ class VoxCraftApp(ctk.CTk):
         saved_lat = str(cfg.get("latency", ""))
         if any(tok in saved_lat for tok in ("256", "512", "1024")):
             self.latency_var.set(self._latency_to_display(saved_lat))
-        if "minimize_to_tray" in cfg and pystray is not None:
+        if "minimize_to_tray" in cfg and (pystray is not None or IS_LINUX):
             self.minimize_to_tray_var.set(bool(cfg["minimize_to_tray"]))
         if "hotkey_enabled" in cfg:
             self.hotkey_en_var.set(bool(cfg["hotkey_enabled"]))
@@ -2310,21 +2887,30 @@ class VoxCraftApp(ctk.CTk):
             in_labels,
             prev_in,
             self.app_config.get("input_device"),
-            lambda lbls: lbls[0],
+            lambda lbls: next((lbl for lbl in lbls if not lbl.startswith("[WDM-KS]")), lbls[0]),
         )
         sel_out = self._match_device_label(
             self.out_devices,
             out_labels,
             prev_out,
             self.app_config.get("output_device"),
-            lambda lbls: next((lbl for lbl in lbls if "CABLE Input" in lbl or "VB-Audio" in lbl), lbls[0]),
+            lambda lbls: next(
+                (lbl for lbl in lbls if ("CABLE Input" in lbl or "VB-Audio" in lbl) and not lbl.startswith("[WDM-KS]")),
+                next(
+                    (lbl for lbl in lbls if "CABLE Input" in lbl or "VB-Audio" in lbl),
+                    next((lbl for lbl in lbls if not lbl.startswith("[WDM-KS]")), lbls[0]),
+                ),
+            ),
         )
         sel_mon = self._match_device_label(
             self.out_devices,
             out_labels,
             prev_mon,
             self.app_config.get("monitor_device"),
-            lambda lbls: next((lbl for lbl in lbls if "CABLE" not in lbl), lbls[0]),
+            lambda lbls: next(
+                (lbl for lbl in lbls if "CABLE" not in lbl and not lbl.startswith("[WDM-KS]")),
+                next((lbl for lbl in lbls if "CABLE" not in lbl), lbls[0]),
+            ),
         )
 
         self.in_dev_var.set(sel_in)
@@ -2450,6 +3036,21 @@ class VoxCraftApp(ctk.CTk):
                         threading.Thread(target=self.router.stop, daemon=True).start()
                     return
                 if ok:
+                    synced_fallback = False
+                    used_in = getattr(self.router, "last_used_in_idx", None)
+                    used_out = getattr(self.router, "last_used_out_idx", None)
+                    if used_in is not None and used_in != in_idx:
+                        matched_in = next((d.label for d in self.in_devices if d.index == used_in), None)
+                        if matched_in and self.in_dev_var.get() != matched_in:
+                            self.in_dev_var.set(matched_in)
+                            synced_fallback = True
+                    if used_out is not None and used_out != out_idx:
+                        matched_out = next((d.label for d in self.out_devices if d.index == used_out), None)
+                        if matched_out and self.out_dev_var.get() != matched_out:
+                            self.out_dev_var.set(matched_out)
+                            synced_fallback = True
+                    if synced_fallback:
+                        self._save_config()
                     self.power_btn.configure(text=self._t("stop_audio"), fg_color="#dc2626", hover_color="#ef4444")
                     self.status_lbl.configure(text=msg, text_color="#10b981")
                     self._schedule_eq_redraw()
@@ -4341,16 +4942,29 @@ class VoxCraftApp(ctk.CTk):
             self._hold_base_bypass = None
             self._set_bypass_state(base)
 
+    def _has_visible_tray(self) -> bool:
+        if self._tray_icon is None or getattr(self, "_tray_failed", False):
+            return False
+        if not IS_LINUX:
+            return True
+        mod = getattr(type(self._tray_icon), "__module__", "")
+        if "xorg" in mod:
+            return _has_x11_systray_owner()
+        return True
+
     def _on_close(self):
         if (
             self._is_loaded
             and not self._is_quitting
             and hasattr(self, "minimize_to_tray_var")
             and self.minimize_to_tray_var.get()
-            and self._tray_icon is not None
         ):
-            self._minimize_to_tray()
-            return
+            if self._has_visible_tray():
+                self._minimize_to_tray()
+                return
+            if IS_LINUX:
+                self._minimize_window_to_taskbar()
+                return
         self._quit_app()
 
     def _quit_app(self):

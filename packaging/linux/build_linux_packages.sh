@@ -86,6 +86,7 @@ Priority: optional
 Architecture: $ARCH_DEB
 Installed-Size: $INSTALLED_KB
 Depends: libportaudio2, libc6, libx11-6
+Recommends: gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1, python3-gi
 Maintainer: CakeSweet <noreply@github.com>
 Homepage: https://github.com/CakeSweet/voxcraft
 Description: Real-time desktop voice modulator and DSP studio
