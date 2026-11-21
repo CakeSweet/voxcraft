@@ -1,239 +1,85 @@
-name: Build & Publish Releases (Windows, Linux .deb & .rpm)
+name: Release Tauri assinada
 
 on:
   push:
-    branches:
-      - main
-      - master
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Versão/Tag opcional da Release (ex: v2.1.1). Deixe vazio para auto-versionar."
-        required: false
-        default: ""
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  prepare-release:
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.meta.outputs.tag }}
-      version: ${{ steps.meta.outputs.version }}
-      commit: ${{ github.sha }}
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            triple: x86_64-pc-windows-msvc
+          - os: ubuntu-22.04
+            platform: linux
+            triple: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/build/tauri
     steps:
-      - name: Checkout repository history
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
-
-      - name: Compute versioned release tag & create GitHub Release
-        id: meta
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          BASE_VER="$(python3 - <<'PY'
-          import re
-          with open("app.py", "r", encoding="utf-8") as f:
-              m = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', f.read(), re.M)
-          print(m.group(1) if m else "2.1.0")
-          PY
-          )"
-
-          TAG=""
-          VER=""
-          INPUT_VER="${{ inputs.version }}"
-
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            TAG="${{ github.ref_name }}"
-            VER="${TAG#v}"
-            VER="${VER#V}"
-          elif [ -n "$INPUT_VER" ] && [ "$INPUT_VER" != "latest" ]; then
-            VER="${INPUT_VER#v}"
-            VER="${VER#V}"
-            TAG="v${VER}"
-          else
-            CAND="v${BASE_VER}"
-            if git rev-parse -q --verify "refs/tags/$CAND" >/dev/null || gh release view "$CAND" >/dev/null 2>&1; then
-              VER="${BASE_VER}.${{ github.run_number }}"
-              TAG="v${VER}"
-            else
-              VER="${BASE_VER}"
-              TAG="v${VER}"
-            fi
-          fi
-
-          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag "$TAG" "${{ github.sha }}"
-            git push origin "$TAG" || true
-          fi
-
-          PREV_TAG="$(git tag --list 'v*' --sort=-v:refname | grep -Fxv "$TAG" | head -n 1 || true)"
-          if [ -n "$PREV_TAG" ]; then
-            CHANGELOG="$(git log "${PREV_TAG}..${{ github.sha }}" --pretty=format:'- %s (`%h`)' -n 25 || true)"
-          else
-            CHANGELOG="$(git log "${{ github.sha }}" --pretty=format:'- %s (`%h`)' -n 15 || true)"
-          fi
-          if [ -z "$CHANGELOG" ]; then
-            CHANGELOG="- Build automated release \`${TAG}\` (${{ github.sha }})"
-          fi
-
-          NOTES_FILE="$(mktemp)"
-          cat > "$NOTES_FILE" <<EOF
-          ## VoxCraft Studio ${TAG}
-
-          ### Downloads
-          - **Windows Installer**: \`VoxCraftStudio_Setup_v${VER}.exe\` *(inclui opção de instalar o VB-Audio Virtual Cable)*
-          - **Windows Portable**: \`VoxCraftStudio_Portable_v${VER}.exe\` *(executável único sem instalação)*
-          - **Linux (Debian / Ubuntu)**: \`voxcraft-studio_${VER}_amd64.deb\`
-          - **Linux (Fedora / RHEL / openSUSE)**: \`voxcraft-studio-${VER}-1.x86_64.rpm\`
-
-          ### Changes
-          ${CHANGELOG}
-          EOF
-
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "VoxCraft Studio ${TAG}" --notes-file "$NOTES_FILE" --latest
-          else
-            gh release create "$TAG" --target "${{ github.sha }}" --title "VoxCraft Studio ${TAG}" --notes-file "$NOTES_FILE" --latest
-          fi
-
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-
-  build-windows-release:
-    needs: prepare-release
-    runs-on: windows-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.11"
-
-      - name: Install dependencies & PyInstaller
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
-
-      - name: Embed build version metadata
-        shell: pwsh
-        run: |
-          @{
-            repo = "${{ github.repository }}"
-            version = "${{ needs.prepare-release.outputs.version }}"
-            tag = "${{ needs.prepare-release.outputs.tag }}"
-            commit = "${{ needs.prepare-release.outputs.commit }}"
-          } | ConvertTo-Json | Set-Content -Path "assets\build_info.json" -Encoding UTF8
-
-      - name: Build VoxCraftStudio (Folder for Installer)
-        run: |
-          pyinstaller --noconfirm --clean --windowed `
-            --name "VoxCraftStudio" `
-            --icon="assets\voxcraft.ico" `
-            --add-data "assets;assets" `
-            --hidden-import=pystray._win32 `
-            --hidden-import=PIL._tkinter_finder `
-            --collect-all customtkinter `
-            app.py
-
-      - name: Build VoxCraftStudio Portable (Single .exe)
-        run: |
-          pyinstaller --noconfirm --clean --onefile --windowed `
-            --name "VoxCraftStudio-Portable" `
-            --icon="assets\voxcraft.ico" `
-            --add-data "assets;assets" `
-            --hidden-import=pystray._win32 `
-            --hidden-import=PIL._tkinter_finder `
-            --collect-all customtkinter `
-            app.py
-
-      - name: Ensure Inno Setup 6 is installed
-        shell: pwsh
-        run: |
-          $iscc = @(
-            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
-            "${env:LocalAppData}\Programs\Inno Setup 6\ISCC.exe"
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $iscc) {
-            choco install innosetup -y
-            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          }
-          "ISCC_EXE=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Compile Versioned Windows Setup & Portable
-        shell: pwsh
-        run: |
-          $ver = "${{ needs.prepare-release.outputs.version }}"
-          & "$env:ISCC_EXE" "/DMyAppVersion=$ver" "/FVoxCraftStudio_Setup_v$ver" "installer.iss"
-          Copy-Item "dist\VoxCraftStudio-Portable.exe" "Output\VoxCraftStudio_Portable_v$ver.exe" -Force
-
-      - name: Upload Windows assets to Release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = "${{ needs.prepare-release.outputs.tag }}"
-          $ver = "${{ needs.prepare-release.outputs.version }}"
-          gh release upload "$tag" `
-            "Output\VoxCraftStudio_Setup_v$ver.exe" `
-            "Output\VoxCraftStudio_Portable_v$ver.exe" `
-            --clobber
-
-  build-linux-release:
-    needs: prepare-release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install system packaging & audio dependencies
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: internal/client/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Conferir a versão da tag
+        if: github.event_name == 'push'
+        run: python scripts/release.py check
+      - name: Instalar dependências do Linux
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libportaudio2 portaudio19-dev python3-tk dpkg rpm
-
-      - name: Install Python dependencies & PyInstaller
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libportaudio2 rpm
+      - name: Instalar dependências do build
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          python -m pip install -r internal/core/requirements.txt -r scripts/requirements-build.txt
+          npm ci --prefix internal/client
+      - name: Gerar instaladores assinados
+        env:
+          UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
+          SIGNING_PRIVATE_KEY: ${{ secrets.SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: python scripts/build.py --target ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.platform }}
+          path: |
+            build/tauri/${{ matrix.triple }}/release/bundle/**/*.deb
+            build/tauri/${{ matrix.triple }}/release/bundle/**/*.rpm
+            build/tauri/${{ matrix.triple }}/release/bundle/**/*-setup.exe
+            build/tauri/${{ matrix.triple }}/release/bundle/**/*.sig
+          if-no-files-found: error
 
-      - name: Embed build version metadata
-        run: |
-          python3 - <<'PY'
-          import json
-          data = {
-              "repo": "${{ github.repository }}",
-              "version": "${{ needs.prepare-release.outputs.version }}",
-              "tag": "${{ needs.prepare-release.outputs.tag }}",
-              "commit": "${{ needs.prepare-release.outputs.commit }}",
-          }
-          with open("assets/build_info.json", "w", encoding="utf-8") as f:
-              json.dump(data, f, indent=2)
-          PY
-
-      - name: Build Linux .deb and .rpm packages
-        run: |
-          chmod +x packaging/linux/build_linux_packages.sh
-          ./packaging/linux/build_linux_packages.sh "${{ needs.prepare-release.outputs.version }}"
-
-      - name: Upload Linux .deb & .rpm assets to Release
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundles-*
+          path: build/artifacts
+      - name: Preparar instaladores e latest.json
+        run: python scripts/release.py stage build/artifacts build/release
+      - name: Publicar no GitHub Releases
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ needs.prepare-release.outputs.tag }}" \
-            Output/*.deb \
-            Output/*.rpm \
-            --clobber
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --latest build/release/*

@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VoxCraft Studio</title>
+    <link rel="stylesheet" href="/index.css" />
+</head>
+
+<body>
+    <div class="app-shell">
+        <header class="window-titlebar" data-tauri-drag-region="deep" aria-label="Barra da janela">
+            <div class="window-titlebar-brand">
+                <img src="/assets/voxcraft.png" alt="" class="window-titlebar-icon" />
+                <span>VoxCraft Studio</span>
+            </div>
+            <div class="window-controls" data-tauri-drag-region="false">
+                <button id="window-minimize" class="window-control" type="button"
+                        data-window-control="minimize_window" aria-label="Minimizar">
+                    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                        <path d="M3 8h10" />
+                    </svg>
+                </button>
+                <button id="window-maximize" class="window-control" type="button"
+                        data-window-control="maximize_window" aria-label="Maximizar">
+                    <svg id="window-maximize-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                        <rect x="3.5" y="3.5" width="9" height="9" rx="1" />
+                    </svg>
+                    <svg id="window-restore-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden>
+                        <path d="M5.5 5.5V4.75A1.25 1.25 0 0 1 6.75 3.5h4.5a1.25 1.25 0 0 1 1.25 1.25v4.5a1.25 1.25 0 0 1-1.25 1.25h-.75" />
+                        <rect x="3.5" y="5.5" width="7.5" height="7" rx="1" />
+                    </svg>
+                </button>
+                <button id="window-close" class="window-control window-control-close" type="button"
+                        data-window-control="close_window" aria-label="Fechar janela">
+                    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                        <path d="m4 4 8 8M12 4l-8 8" />
+                    </svg>
+                </button>
+            </div>
+        </header>
+        <div class="window-resize-handle resize-n" data-window-resize="North" aria-hidden="true"></div>
+        <div class="window-resize-handle resize-s" data-window-resize="South" aria-hidden="true"></div>
+        <div class="window-resize-handle resize-e" data-window-resize="East" aria-hidden="true"></div>
+        <div class="window-resize-handle resize-w" data-window-resize="West" aria-hidden="true"></div>
+        <div class="window-resize-handle resize-ne" data-window-resize="NorthEast" aria-hidden="true"></div>
+        <div class="window-resize-handle resize-nw" data-window-resize="NorthWest" aria-hidden="true"></div>
+        <div class="window-resize-handle resize-se" data-window-resize="SouthEast" aria-hidden="true"></div>
+        <div class="window-resize-handle resize-sw" data-window-resize="SouthWest" aria-hidden="true"></div>
+
+        <header class="topbar">
+            <div class="preset-tools">
+                <select id="preset-select" class="select-input preset-select" data-i18n-label="preset" aria-label="Preset">
+                    <option value="" data-i18n="current_config">Configuração atual</option>
+                </select>
+                <button id="save-preset" class="button preset-action" type="button"
+                        data-i18n-label="save" aria-label="Salvar">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                        <path d="M5 3h12l4 4v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+                        <path d="M7 3v6h9V3M7 21v-8h10v8" />
+                    </svg>
+                </button>
+                <button id="delete-preset" class="button preset-action button-danger-outline" type="button"
+                        data-i18n-label="delete" aria-label="Excluir" disabled>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                        <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5m4-5v5" />
+                    </svg>
+                </button>
+            </div>
+
+            <div class="topbar-actions">
+                <button id="open-settings" class="button button-small" type="button"
+                        data-i18n="settings">Configurações</button>
+                <button id="open-updates" class="button button-small" type="button"
+                        data-i18n="update">Atualizar</button>
+                <button id="bypass-button" class="button button-small" type="button" aria-pressed="false"
+                        data-i18n="original_voice">Voz Original</button>
+                <button id="power-button" class="button button-primary" type="button" data-i18n="start_audio">Iniciar
+                    Áudio</button>
+            </div>
+        </header>
+
+        <main class="workspace">
+            <aside class="sidebar" aria-label="Controles de áudio">
+                <section class="card route-card">
+                    <header class="route-header">
+                        <h2 class="section-title" data-i18n="audio_section">Áudio</h2>
+                        <label class="switch-row">
+                            <input id="monitor-enabled" type="checkbox" />
+                            <span class="switch-track" aria-hidden="true"></span>
+                            <span data-i18n="monitor_voice">Escutar minha voz</span>
+                        </label>
+                    </header>
+
+                    <label class="field-label" for="input-device" data-i18n="microphone">Microfone</label>
+                    <select id="input-device" class="select-input device-select">
+                        <option value="" data-i18n="loading_devices">Listando dispositivos…</option>
+                    </select>
+
+                    <label class="field-label" for="output-device" data-i18n="output">Saída</label>
+                    <select id="output-device" class="select-input device-select">
+                        <option value="" data-i18n="loading_devices">Listando dispositivos…</option>
+                    </select>
+
+                    <div class="field-label" data-i18n="status_label">Status</div>
+                    <div class="audio-status">
+                        <span id="audio-status-dot" class="status-dot" aria-hidden="true"></span>
+                        <span id="audio-status-text" data-i18n="stopped" role="status">Parado</span>
+                        <button id="refresh-devices" class="audio-status-action" type="button"
+                                data-i18n-label="refresh_devices" aria-label="Atualizar dispositivos"
+                                aria-describedby="audio-status-text">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                 stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+                                 aria-hidden="true" focusable="false">
+                                <path d="M20 4v5h-5M4 20v-5h5M4.9 10a7.4 7.4 0 0 1 12.2-4l2.9 3M4 15l2.9 3a7.4 7.4 0 0 0 12.2-4" />
+                            </svg>
+                        </button>
+                    </div>
+                </section>
+
+                <section class="card meter-card">
+                    <h2 class="section-title" data-i18n="levels_section">Níveis</h2>
+                    <div class="meter-row">
+                        <span class="meter-label" data-i18n="input_lbl">Entrada</span>
+                        <div class="meter-track"><span id="input-meter" class="meter-fill input-fill"></span></div>
+                        <span id="input-db" class="meter-db">−60 dB</span>
+                    </div>
+                    <div class="meter-row">
+                        <span class="meter-label" data-i18n="output_lbl">Saída</span>
+                        <div class="meter-track"><span id="output-meter" class="meter-fill output-fill"></span></div>
+                        <span id="output-db" class="meter-db">−60 dB</span>
+                    </div>
+                    <div id="gate-indicator" class="gate-indicator is-open" data-i18n="gate_open">● Noise Gate: Aberto
+                    </div>
+                    <canvas id="waveform" class="waveform-canvas" aria-label="Forma de onda de áudio"></canvas>
+                </section>
+
+                <section class="card dynamics-card">
+                    <h2 class="section-title" data-i18n="dynamics_section">Dinâmica &amp; Ganho</h2>
+                    <div id="dynamics-controls" class="dynamics-controls"></div>
+                </section>
+            </aside>
+
+            <section class="workbench" aria-label="Efeitos de áudio">
+                <nav id="tab-list" class="tabbar" role="tablist" aria-label="Categorias de efeitos"></nav>
+                <div id="tab-content" class="tab-content"></div>
+            </section>
+        </main>
+    </div>
+
+    <div id="modal-layer" class="modal-layer" hidden>
+        <div id="modal-backdrop" class="modal-backdrop" aria-hidden="true"></div>
+
+        <dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
+            <section class="dialog-card">
+                <header class="dialog-header">
+                    <h2 id="settings-title" data-i18n="settings_title">Configurações</h2>
+                    <button class="icon-button" type="button" data-close-dialog="settings-dialog"
+                            aria-label="Fechar">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                             stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false">
+                            <path d="m4 4 8 8m0-8-8 8" />
+                        </svg>
+                    </button>
+                </header>
+                <section class="card settings-group">
+                    <h3 class="section-title" data-i18n="appearance_section">Aparência</h3>
+                    <label class="dialog-field">
+                        <span data-i18n="theme_label">Tema</span>
+                        <select id="theme-select" class="select-input">
+                            <option value="dark" data-i18n="theme_dark">Escuro (Dark)</option>
+                            <option value="oled" data-i18n="theme_oled">Dark Puro (OLED)</option>
+                            <option value="light" data-i18n="theme_light">Claro (Light)</option>
+                        </select>
+                    </label>
+                    <label class="dialog-field">
+                        <span data-i18n="language_label">Idioma</span>
+                        <select id="language-select" class="select-input">
+                            <option value="pt">Português</option>
+                            <option value="en">English</option>
+                            <option value="es">Español</option>
+                        </select>
+                    </label>
+                </section>
+
+                <section class="card settings-group">
+                    <h3 class="section-title" data-i18n="audio_section">Áudio</h3>
+                    <label class="dialog-field">
+                        <span data-i18n="latency">Latência</span>
+                        <select id="latency-select" class="select-input">
+                            <option value="256" data-i18n="lat_ultra">Ultra (256)</option>
+                            <option value="512" selected data-i18n="lat_low">Baixa (512)</option>
+                            <option value="1024" data-i18n="lat_stable">Estável (1024)</option>
+                        </select>
+                    </label>
+                </section>
+
+                <section class="card settings-group hotkey-settings">
+                    <h3 class="section-title" data-i18n="hotkey_section">Atalho</h3>
+                    <label class="switch-row">
+                        <input id="hotkey-enabled" type="checkbox" checked />
+                        <span class="switch-track" aria-hidden="true"></span>
+                        <span data-i18n="enable_hotkey">Ativar atalho</span>
+                    </label>
+                    <div class="hotkey-row">
+                        <span class="field-label" data-i18n="key_label">Tecla</span>
+                        <button id="hotkey-key" class="button hotkey-key" type="button">F9</button>
+                    </div>
+                    <label class="switch-row">
+                        <input id="hotkey-hold" type="checkbox" />
+                        <span class="switch-track" aria-hidden="true"></span>
+                        <span data-i18n="hold_key">Segurar tecla</span>
+                    </label>
+                    <p id="hotkey-hint" class="hotkey-hint" data-i18n="key_hint">Atalho disponível enquanto a janela
+                        VoxCraft estiver ativa.</p>
+                </section>
+            </section>
+        </dialog>
+
+        <dialog id="updates-dialog" class="dialog">
+            <section class="dialog-card">
+                <header class="dialog-header">
+                    <h2 data-i18n="upd_header">Atualização do VoxCraft Studio</h2>
+                    <button class="icon-button" type="button" data-close-dialog="updates-dialog"
+                            aria-label="Fechar">×</button>
+                </header>
+                <p id="update-status" class="update-status" role="status">As atualizações são verificadas automaticamente ao
+                    iniciar.</p>
+                <div class="dialog-actions">
+                    <button id="check-updates" class="button button-primary" type="button" data-action="check"
+                            data-i18n="upd_check_btn">Verificar</button>
+                    <button class="button" type="button" data-close-dialog="updates-dialog"
+                            data-i18n="close">Fechar</button>
+                </div>
+            </section>
+        </dialog>
+    </div>
+
+    <script type="module" src="/src-front/main.js"></script>
+</body>
+
+</html>
