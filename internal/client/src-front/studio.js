@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
+import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { setupUpdater } from "./updates.js";
 
 const TEXT = {
@@ -7,11 +9,11 @@ const TEXT = {
     preset: "Preset", current_config: "Configuração atual", save: "Salvar", delete: "Excluir",
     settings: "Configurações", update: "Atualizar", original_voice: "Voz Original",
     start_audio: "Iniciar Áudio", stop_audio: "Parar Áudio", audio_section: "Áudio", microphone: "Microfone",
-    output: "Saída", status_label: "Status", monitor_voice: "Escutar minha voz",
+    output: "Saída virtual", status_label: "Status", monitor_voice: "Escutar minha voz",
     latency: "Latência", lat_ultra: "Ultra (256)", lat_low: "Baixa (512)", lat_stable: "Estável (1024)",
     refresh_devices: "Atualizar Dispositivos",
     loading_devices: "Listando dispositivos…", stopped: "Parado", hotkey_section: "Atalho", enable_hotkey: "Ativar atalho",
-    key_label: "Tecla", define_key: "Definir tecla", key_hint: "Atalho disponível enquanto a janela VoxCraft estiver ativa.",
+    key_label: "Atalho", define_key: "Definir atalho",
     hold_key: "Segurar tecla", levels_section: "Níveis", input_lbl: "Entrada", output_lbl: "Saída",
     gate_open: "● Noise Gate: Aberto", gate_closed: "● Noise Gate: Silenciado",
     dynamics_section: "Dinâmica & Ganho", input_gain: "Ganho de Entrada", noise_gate: "Noise Gate",
@@ -43,19 +45,23 @@ const TEXT = {
     browser_mode: "Abra pelo Tauri para controlar o core Python.", save_preset_prompt: "Nome para este preset:",
     delete_preset_confirm: "Excluir o preset personalizado “{name}”?", preset_saved: "Preset salvo.",
     preset_deleted: "Preset excluído.", only_custom_delete: "Somente presets personalizados podem ser excluídos.",
-    audio_error: "Erro ao iniciar o áudio", key_capture: "Pressione uma tecla… (Esc cancela)",
+    audio_error: "Erro ao iniciar o áudio", key_capture: "Pressione a combinação… (Esc cancela)",
     reset_confirm: "Restaurar todos os efeitos para o preset Normal?", current_audio: "Configuração atual",
-    start_required_devices: "Selecione uma entrada e uma saída de áudio.",
+    start_required_devices: "Selecione uma entrada de áudio.",
+    no_virtual_output: "Nenhuma saída virtual detectada",
+    virtual_output_required: "A saída virtual obrigatória não está disponível. O áudio não pode ser iniciado.",
+    configure_virtual_output: "Configurar saída virtual",
+    virtual_output_setup_failed: "Não foi possível configurar a saída virtual automaticamente.",
   },
   en: {
     preset: "Preset", current_config: "Current configuration", save: "Save", delete: "Delete",
     settings: "Settings", update: "Update", original_voice: "Original Voice",
     start_audio: "Start Audio", stop_audio: "Stop Audio", audio_section: "Audio", microphone: "Microphone",
-    output: "Output", status_label: "Status", monitor_voice: "Hear my voice",
+    output: "Virtual output", status_label: "Status", monitor_voice: "Hear my voice",
     latency: "Latency", lat_ultra: "Ultra (256)", lat_low: "Low (512)", lat_stable: "Stable (1024)",
     refresh_devices: "Refresh Devices",
     loading_devices: "Listing devices…", stopped: "Stopped", hotkey_section: "Hotkey", enable_hotkey: "Enable hotkey",
-    key_label: "Key", define_key: "Set key", key_hint: "The hotkey works while the VoxCraft window is focused.",
+    key_label: "Shortcut", define_key: "Set shortcut",
     hold_key: "Hold key", levels_section: "Levels", input_lbl: "Input", output_lbl: "Output",
     gate_open: "● Noise Gate: Open", gate_closed: "● Noise Gate: Muted",
     dynamics_section: "Dynamics & Gain", input_gain: "Input Gain", noise_gate: "Noise Gate",
@@ -87,19 +93,23 @@ const TEXT = {
     browser_mode: "Open the Tauri app to control the Python core.", save_preset_prompt: "Name this preset:",
     delete_preset_confirm: "Delete custom preset “{name}”?", preset_saved: "Preset saved.",
     preset_deleted: "Preset deleted.", only_custom_delete: "Only custom presets can be deleted.",
-    audio_error: "Audio start error", key_capture: "Press a key… (Esc cancels)",
+    audio_error: "Audio start error", key_capture: "Press a shortcut… (Esc cancels)",
     reset_confirm: "Reset all effects to the Normal preset?", current_audio: "Current configuration",
-    start_required_devices: "Select an input and an output device.",
+    start_required_devices: "Select an input device.",
+    no_virtual_output: "No virtual output detected",
+    virtual_output_required: "The required virtual output is unavailable. Audio cannot be started.",
+    configure_virtual_output: "Configure virtual output",
+    virtual_output_setup_failed: "Could not configure the virtual output automatically.",
   },
   es: {
     preset: "Preset", current_config: "Configuración actual", save: "Guardar", delete: "Eliminar",
     settings: "Configuración", update: "Actualizar", original_voice: "Voz Original",
     start_audio: "Iniciar Audio", stop_audio: "Detener Audio", audio_section: "Audio", microphone: "Micrófono",
-    output: "Salida", status_label: "Estado", monitor_voice: "Escuchar mi voz",
+    output: "Salida virtual", status_label: "Estado", monitor_voice: "Escuchar mi voz",
     latency: "Latencia", lat_ultra: "Ultra (256)", lat_low: "Baja (512)", lat_stable: "Estable (1024)",
     refresh_devices: "Actualizar Dispositivos",
     loading_devices: "Listando dispositivos…", stopped: "Detenido", hotkey_section: "Atajo", enable_hotkey: "Activar atajo",
-    key_label: "Tecla", define_key: "Asignar tecla", key_hint: "El atajo funciona mientras la ventana de VoxCraft esté activa.",
+    key_label: "Atajo", define_key: "Asignar atajo",
     hold_key: "Mantener tecla", levels_section: "Niveles", input_lbl: "Entrada", output_lbl: "Salida",
     gate_open: "● Noise Gate: Abierto", gate_closed: "● Noise Gate: Silenciado",
     dynamics_section: "Dinámica y Ganancia", input_gain: "Ganancia de Entrada", noise_gate: "Noise Gate",
@@ -131,14 +141,18 @@ const TEXT = {
     browser_mode: "Abre la aplicación Tauri para controlar el core Python.", save_preset_prompt: "Nombre para este preset:",
     delete_preset_confirm: "¿Eliminar el preset personalizado “{name}”?", preset_saved: "Preset guardado.",
     preset_deleted: "Preset eliminado.", only_custom_delete: "Solo se pueden eliminar presets personalizados.",
-    audio_error: "Error al iniciar el audio", key_capture: "Pulsa una tecla… (Esc cancela)",
+    audio_error: "Error al iniciar el audio", key_capture: "Pulsa la combinación… (Esc cancela)",
     reset_confirm: "¿Restablecer todos los efectos al preset Normal?", current_audio: "Configuración actual",
-    start_required_devices: "Selecciona una entrada y una salida de audio.",
+    start_required_devices: "Selecciona una entrada de audio.",
+    no_virtual_output: "No se detectó una salida virtual",
+    virtual_output_required: "La salida virtual obligatoria no está disponible. No se puede iniciar el audio.",
+    configure_virtual_output: "Configurar salida virtual",
+    virtual_output_setup_failed: "No se pudo configurar automáticamente la salida virtual.",
   },
 };
 
 const PARAMS_DEFAULT = {
-  bypass: false, input_gain_db: 0, output_gain_db: 0, gate_enabled: false, gate_threshold_db: -44,
+  bypass: false, input_gain_db: 0, output_gain_db: 0, gate_enabled: true, gate_threshold_db: -44,
   comp_enabled: true, comp_threshold_db: -18, pitch_enabled: false, pitch_semitones: 0, pitch_cents: 0,
   pitch_mix: 1, freq_shift_enabled: false, freq_shift_hz: 0, freq_shift_mix: 1, vocoder_enabled: false,
   vocoder_carrier: "Dente de Serra", vocoder_freq_hz: 110, vocoder_smooth: 0.45, vocoder_mix: 0.85,
@@ -298,7 +312,6 @@ const TAB_DEFS = [
 ];
 
 const MIXER_MODULES = [
-  ["gate_enabled", "noise_gate"], ["comp_enabled", "compressor"],
   ["pitch_enabled", "pitch_shift"], ["freq_shift_enabled", "freq_shift"],
   ["vocoder_enabled", "vocoder"], ["eq_enabled", "equalizer"],
   ["phaser_enabled", "phaser"], ["wah_enabled", "wah"],
@@ -317,13 +330,170 @@ let presetNames = { builtIn: [], custom: [] };
 let selectedPreset = "";
 let devices = { inputs: [], outputs: [] };
 let routing = readStoredRouting();
+let virtualOutputSetupSupported = false;
+let virtualOutputSetupCanRetry = false;
 let pendingParams = {};
 let paramTimer = null;
 let meterBusy = false;
 let captureHotkey = false;
 let hotkey = localStorage.getItem("voxcraft-hotkey") || "F9";
+const HOTKEY_MODIFIER_ORDER = ["CTRL", "ALT", "SHIFT", "SUPER"];
 let hotkeyDown = false;
 let holdBaseBypass = null;
+let registeredHotkey = null;
+let registeredPortalHotkey = null;
+let globalHotkeyRegistered = false;
+let unlistenPortalHotkey = null;
+let hotkeyRegistrationQueue = Promise.resolve();
+
+function normalizeHotkeyKey(key) {
+  const value = String(key).trim();
+  if (/^[a-z]$/i.test(value)) return `Key${value.toUpperCase()}`;
+  if (/^\d$/.test(value)) return `Digit${value}`;
+
+  const aliases = {
+    " ": "Space",
+    "`": "Backquote",
+    "\\": "Backslash",
+    "[": "BracketLeft",
+    "]": "BracketRight",
+    ",": "Comma",
+    "=": "Equal",
+    "-": "Minus",
+    ".": "Period",
+    "'": "Quote",
+    ";": "Semicolon",
+    "/": "Slash",
+    Esc: "Escape",
+    Return: "Enter",
+    Left: "ArrowLeft",
+    Right: "ArrowRight",
+    Up: "ArrowUp",
+    Down: "ArrowDown",
+    Page_Up: "PageUp",
+    Page_Down: "PageDown",
+    Caps_Lock: "CapsLock",
+    Num_Lock: "NumLock",
+    Scroll_Lock: "ScrollLock",
+    Bracketleft: "BracketLeft",
+    Bracketright: "BracketRight",
+    comma: "Comma",
+    equal: "Equal",
+    minus: "Minus",
+    period: "Period",
+    apostrophe: "Quote",
+    semicolon: "Semicolon",
+    slash: "Slash",
+  };
+  return aliases[value] || value;
+}
+
+function normalizeHotkey(shortcut) {
+  const raw = String(shortcut ?? "F9");
+  const original = raw === " " ? "Space" : raw.trim() || "F9";
+  const tokens = original === "+"
+    ? ["SHIFT", "Equal"]
+    : original.split("+").map((token) => token.trim()).filter(Boolean);
+  const modifiers = new Set();
+  let key = null;
+  const modifierAliases = {
+    CTRL: "CTRL", CONTROL: "CTRL",
+    ALT: "ALT", OPTION: "ALT",
+    SHIFT: "SHIFT",
+    SUPER: "SUPER", META: "SUPER", CMD: "SUPER", COMMAND: "SUPER",
+  };
+
+  for (const token of tokens) {
+    const modifier = modifierAliases[token.toUpperCase()];
+    if (modifier) {
+      modifiers.add(modifier);
+    } else if (key === null) {
+      key = normalizeHotkeyKey(token);
+    } else {
+      return "F9";
+    }
+  }
+  if (!key) return "F9";
+  return [...HOTKEY_MODIFIER_ORDER.filter((modifier) => modifiers.has(modifier)), key].join("+");
+}
+
+function hotkeyParts(shortcut) {
+  const tokens = normalizeHotkey(shortcut).split("+");
+  return {
+    key: tokens.at(-1),
+    modifiers: new Set(tokens.slice(0, -1)),
+  };
+}
+
+function formatHotkey(shortcut) {
+  const { key, modifiers } = hotkeyParts(shortcut);
+  const labels = { CTRL: "Ctrl", ALT: "Alt", SHIFT: "Shift", SUPER: "Super" };
+  const keyLabels = {
+    ArrowDown: "Down",
+    ArrowLeft: "Left",
+    ArrowRight: "Right",
+    ArrowUp: "Up",
+    Backspace: "Backspace",
+    Backquote: "`",
+    Backslash: "\\",
+    BracketLeft: "[",
+    BracketRight: "]",
+    Comma: ",",
+    Equal: "=",
+    Minus: "-",
+    PageDown: "Page Down",
+    PageUp: "Page Up",
+    Period: ".",
+    Quote: "'",
+    Semicolon: ";",
+    Slash: "/",
+    Space: "Space",
+  };
+  const displayKey = keyLabels[key]
+    || key.replace(/^Key([A-Z])$/, "$1").replace(/^Digit([0-9])$/, "$1");
+  return [
+    ...HOTKEY_MODIFIER_ORDER.filter((modifier) => modifiers.has(modifier)).map((modifier) => labels[modifier]),
+    displayKey,
+  ].join("+");
+}
+
+function hotkeyModifiersFromEvent(event) {
+  return [
+    event.ctrlKey && "CTRL",
+    event.altKey && "ALT",
+    event.shiftKey && "SHIFT",
+    event.metaKey && "SUPER",
+  ].filter(Boolean);
+}
+
+function modifierKeyFromEvent(event) {
+  if (["Control", "ControlLeft", "ControlRight"].includes(event.key)
+    || /^Control(Left|Right)$/.test(event.code)) return "CTRL";
+  if (["Alt", "AltLeft", "AltRight", "AltGraph"].includes(event.key)
+    || /^Alt(Left|Right)$/.test(event.code)) return "ALT";
+  if (["Shift", "ShiftLeft", "ShiftRight"].includes(event.key)
+    || /^Shift(Left|Right)$/.test(event.code)) return "SHIFT";
+  if (["Meta", "MetaLeft", "MetaRight", "OS"].includes(event.key)
+    || /^(Meta|OS)(Left|Right)?$/.test(event.code)) return "SUPER";
+  return null;
+}
+
+function formatHotkeyCapture(modifiers) {
+  const labels = { CTRL: "Ctrl", ALT: "Alt", SHIFT: "Shift", SUPER: "Super" };
+  const prefix = HOTKEY_MODIFIER_ORDER
+    .filter((modifier) => modifiers.includes(modifier))
+    .map((modifier) => labels[modifier]);
+  return prefix.length ? `${prefix.join("+")}+…` : t("key_capture");
+}
+
+function matchesHotkeyEvent(event, shortcut) {
+  const { key, modifiers } = hotkeyParts(shortcut);
+  const eventKey = event.code || normalizeHotkeyKey(event.key);
+  const eventModifiers = hotkeyModifiersFromEvent(event);
+  return eventKey === key
+    && eventModifiers.length === modifiers.size
+    && eventModifiers.every((modifier) => modifiers.has(modifier));
+}
 
 function t(key) {
   return TEXT[language]?.[key] ?? TEXT.pt[key] ?? key;
@@ -649,7 +819,7 @@ function renderEqTab(panel) {
   panel.append(cuts);
 
   const bands = document.createElement("section");
-  bands.className = "card eq-bands";
+  bands.className = "card eq-bands custom-scrollbar";
   [
     ["eq_band1_db", "eq_b1"], ["eq_band2_db", "eq_b2"], ["eq_band3_db", "eq_b3"],
     ["eq_band4_db", "eq_b4"], ["eq_band5_db", "eq_b5"],
@@ -899,12 +1069,12 @@ async function pollMeters() {
   }
 }
 
-function fillDeviceSelect(select, items, savedIndex) {
+function fillDeviceSelect(select, items, savedIndex, emptyLabel = "no_devices") {
   select.replaceChildren();
   if (items.length === 0) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = t("no_devices");
+    option.textContent = t(emptyLabel);
     select.append(option);
     return;
   }
@@ -920,7 +1090,21 @@ function fillDeviceSelect(select, items, savedIndex) {
 
 function renderDevices() {
   fillDeviceSelect(document.querySelector("#input-device"), devices.inputs, routing.inputIndex);
-  fillDeviceSelect(document.querySelector("#output-device"), devices.outputs, routing.outputIndex);
+  const virtualOutputs = devices.outputs.filter((device) => device.isVirtualOutput);
+  document.querySelector("#configure-virtual-output").hidden =
+    !virtualOutputSetupSupported || !virtualOutputSetupCanRetry || virtualOutputs.length > 0;
+  const savedOutputExists = virtualOutputs.some(
+    (device) => String(device.index) === String(routing.outputIndex),
+  );
+  const preferredOutput = virtualOutputs.find((device) => /cable\s*input/i.test(device.name))
+    || virtualOutputs.find((device) => /vb[\s-]*audio/i.test(device.name))
+    || virtualOutputs[0];
+  fillDeviceSelect(
+    document.querySelector("#output-device"),
+    virtualOutputs,
+    savedOutputExists ? routing.outputIndex : preferredOutput?.index,
+    "no_virtual_output",
+  );
   updateRoutingFromControls();
 }
 
@@ -967,6 +1151,27 @@ async function refreshDevices() {
     if (wasRunning) await toggleAudio();
   } catch (error) {
     setAudioStatus(String(error), audioRunning, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function configureVirtualOutput() {
+  const button = document.querySelector("#configure-virtual-output");
+  button.disabled = true;
+  try {
+    const setup = await coreRequest("ensure_virtual_output");
+    virtualOutputSetupSupported = setup.supported === true;
+    virtualOutputSetupCanRetry = setup.canRetry === true;
+    devices = await coreRequest("list_devices");
+    renderDevices();
+    if (setup.available && devices.outputs.some((device) => device.isVirtualOutput)) {
+      setAudioStatus(t("stopped"), false);
+    } else {
+      setAudioStatus(setup.message || t("virtual_output_setup_failed"), false, true);
+    }
+  } catch (error) {
+    setAudioStatus(String(error), false, true);
   } finally {
     button.disabled = false;
   }
@@ -1075,13 +1280,15 @@ async function toggleAudio() {
     updateRoutingFromControls();
     const inputIndex = Number(routing.inputIndex);
     const outputIndex = Number(routing.outputIndex);
-    if (
-      routing.inputIndex === "" ||
-      routing.outputIndex === "" ||
-      !Number.isInteger(inputIndex) ||
-      !Number.isInteger(outputIndex)
-    ) {
+    if (routing.inputIndex === "" || !Number.isInteger(inputIndex)) {
       setAudioStatus(t("start_required_devices"), false, true);
+      return;
+    }
+    const virtualOutput = devices.outputs.some(
+      (device) => device.isVirtualOutput && device.index === outputIndex,
+    );
+    if (!virtualOutput) {
+      setAudioStatus(t("virtual_output_required"), false, true);
       return;
     }
     setAudioStatus(t("audio_starting"), false);
@@ -1111,18 +1318,103 @@ function setBypass(enabled) {
   scheduleParameterUpdate("bypass", params.bypass);
 }
 
+function releaseHeldHotkey() {
+  if (hotkeyDown && holdBaseBypass !== null) setBypass(holdBaseBypass);
+  hotkeyDown = false;
+  holdBaseBypass = null;
+}
+
+function pressHotkey() {
+  if (captureHotkey || !document.querySelector("#hotkey-enabled").checked) return;
+  if (hotkeyDown) return;
+  hotkeyDown = true;
+  if (document.querySelector("#hotkey-hold").checked) {
+    holdBaseBypass = Boolean(params.bypass);
+    setBypass(!holdBaseBypass);
+  } else {
+    setBypass(!params.bypass);
+  }
+}
+
+function handleGlobalHotkey(event) {
+  if (event.state === "Pressed") pressHotkey();
+  if (event.state === "Released") releaseHeldHotkey();
+}
+
+function configureGlobalHotkey() {
+  if (!("__TAURI_INTERNALS__" in window)) return Promise.resolve();
+
+  const desiredHotkey = !captureHotkey
+    && document.querySelector("#hotkey-enabled").checked
+    ? hotkey
+    : null;
+
+  hotkeyRegistrationQueue = hotkeyRegistrationQueue.catch(() => {}).then(async () => {
+    try {
+      const waylandSession = await invoke("is_wayland_session");
+      if (waylandSession) {
+        if (registeredHotkey) {
+          await unregister(registeredHotkey);
+          registeredHotkey = null;
+        }
+        if (!unlistenPortalHotkey) {
+          unlistenPortalHotkey = await listen("voxcraft-global-hotkey", ({ payload }) => {
+            handleGlobalHotkey(payload);
+          });
+        }
+        if (registeredPortalHotkey !== desiredHotkey) {
+          await invoke("set_wayland_global_shortcut", { shortcut: desiredHotkey });
+          registeredPortalHotkey = desiredHotkey;
+        }
+        globalHotkeyRegistered = Boolean(desiredHotkey);
+        return;
+      }
+
+      if (registeredPortalHotkey !== null) {
+        await invoke("set_wayland_global_shortcut", { shortcut: null });
+        registeredPortalHotkey = null;
+      }
+      if (registeredHotkey === desiredHotkey) {
+        globalHotkeyRegistered = Boolean(desiredHotkey);
+        return;
+      }
+      if (registeredHotkey) {
+        await unregister(registeredHotkey);
+        registeredHotkey = null;
+      }
+      if (desiredHotkey) {
+        await register(desiredHotkey, handleGlobalHotkey);
+        registeredHotkey = desiredHotkey;
+      }
+      globalHotkeyRegistered = Boolean(desiredHotkey);
+    } catch (error) {
+      registeredPortalHotkey = null;
+      globalHotkeyRegistered = false;
+      console.error("Não foi possível registrar o atalho global:", error);
+    }
+  });
+
+  return hotkeyRegistrationQueue;
+}
+
 function setupHotkey() {
   const keyButton = document.querySelector("#hotkey-key");
+  hotkey = normalizeHotkey(hotkey);
+  localStorage.setItem("voxcraft-hotkey", hotkey);
   const finishCapture = () => {
+    const wasCapturing = captureHotkey;
     captureHotkey = false;
     keyButton.classList.remove("is-capturing");
-    keyButton.textContent = hotkey;
+    keyButton.textContent = formatHotkey(hotkey);
+    if (wasCapturing) void configureGlobalHotkey();
   };
-  keyButton.textContent = hotkey;
+  keyButton.textContent = formatHotkey(hotkey);
   keyButton.addEventListener("click", () => {
     captureHotkey = true;
+    releaseHeldHotkey();
     keyButton.textContent = t("key_capture");
     keyButton.classList.add("is-capturing");
+    void configureGlobalHotkey();
   });
   document.querySelector("#settings-dialog").addEventListener("close", finishCapture);
 
@@ -1130,47 +1422,74 @@ function setupHotkey() {
     localStorage.getItem("voxcraft-hotkey-enabled") !== "false";
   document.querySelector("#hotkey-hold").checked =
     localStorage.getItem("voxcraft-hotkey-hold") === "true";
+  const hotkeyEnabledControl = document.querySelector("#hotkey-enabled");
+  const hotkeyHoldControl = document.querySelector("#hotkey-hold");
+  const syncHotkeyHoldControl = () => {
+    hotkeyHoldControl.disabled = !hotkeyEnabledControl.checked;
+    if (hotkeyHoldControl.disabled && hotkeyHoldControl.checked) {
+      hotkeyHoldControl.checked = false;
+      localStorage.setItem("voxcraft-hotkey-hold", "false");
+    }
+  };
+  syncHotkeyHoldControl();
   document.querySelector("#hotkey-enabled").addEventListener("change", (event) => {
     localStorage.setItem("voxcraft-hotkey-enabled", String(event.target.checked));
+    if (!event.target.checked) releaseHeldHotkey();
+    syncHotkeyHoldControl();
+    void configureGlobalHotkey();
   });
   document.querySelector("#hotkey-hold").addEventListener("change", (event) => {
+    if (!hotkeyEnabledControl.checked) return;
     localStorage.setItem("voxcraft-hotkey-hold", String(event.target.checked));
+    releaseHeldHotkey();
   });
 
   window.addEventListener("keydown", (event) => {
     if (captureHotkey) {
       event.preventDefault();
-      if (event.key !== "Escape") {
-        hotkey = event.key.length === 1 ? event.key.toUpperCase() : event.key;
-        localStorage.setItem("voxcraft-hotkey", hotkey);
+      event.stopImmediatePropagation();
+      const modifiers = hotkeyModifiersFromEvent(event);
+      if (event.code === "Escape" && modifiers.length === 0) {
+        finishCapture();
+        return;
       }
+
+      if (modifierKeyFromEvent(event)) {
+        keyButton.textContent = formatHotkeyCapture(modifiers);
+        return;
+      }
+
+      const key = normalizeHotkeyKey(event.code || event.key);
+      hotkey = normalizeHotkey([...modifiers, key].join("+"));
+      localStorage.setItem("voxcraft-hotkey", hotkey);
       finishCapture();
       return;
     }
+    if (globalHotkeyRegistered || event.repeat
+      || !document.querySelector("#hotkey-enabled").checked
+      || !matchesHotkeyEvent(event, hotkey)) return;
     const target = event.target;
     if (target instanceof HTMLElement && ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
-    if (!document.querySelector("#hotkey-enabled").checked || event.repeat || event.key.toLowerCase() !== hotkey.toLowerCase()) return;
     event.preventDefault();
-    if (document.querySelector("#hotkey-hold").checked) {
-      holdBaseBypass = Boolean(params.bypass);
-      hotkeyDown = true;
-      setBypass(!holdBaseBypass);
-    } else {
-      setBypass(!params.bypass);
-    }
+    pressHotkey();
   });
   window.addEventListener("keyup", (event) => {
-    if (hotkeyDown && event.key.toLowerCase() === hotkey.toLowerCase()) {
-      hotkeyDown = false;
-      if (holdBaseBypass !== null) setBypass(holdBaseBypass);
-      holdBaseBypass = null;
+    if (captureHotkey && modifierKeyFromEvent(event)) {
+      keyButton.textContent = formatHotkeyCapture(hotkeyModifiersFromEvent(event));
+      return;
+    }
+    const modifier = modifierKeyFromEvent(event);
+    const { key, modifiers } = hotkeyParts(hotkey);
+    if (!globalHotkeyRegistered && hotkeyDown
+      && (event.code === key || (modifier && modifiers.has(modifier)))) {
+      releaseHeldHotkey();
     }
   });
   window.addEventListener("blur", () => {
-    if (hotkeyDown && holdBaseBypass !== null) setBypass(holdBaseBypass);
-    hotkeyDown = false;
-    holdBaseBypass = null;
+    if (!globalHotkeyRegistered) releaseHeldHotkey();
   });
+
+  void configureGlobalHotkey();
 }
 
 function applyStoredThemeAndLanguage() {
@@ -1184,9 +1503,7 @@ function buildDynamicsControls() {
   const container = document.querySelector("#dynamics-controls");
   container.append(
     createSlider(slider("input_gain_db", "input_gain", -18, 24, 0.5, "dB")),
-    createSwitch("gate_enabled", "noise_gate"),
     createSlider(slider("gate_threshold_db", "gate_thresh", -65, -15, 0.5, "dB")),
-    createSwitch("comp_enabled", "compressor"),
     createSlider(slider("comp_threshold_db", "comp_thresh", -36, -4, 0.5, "dB")),
     createSlider(slider("output_gain_db", "output_vol", -24, 24, 0.5, "dB")),
   );
@@ -1243,7 +1560,7 @@ function setupDialogs() {
   }
 
   window.addEventListener("keydown", (event) => {
-    if (!activeDialog) return;
+    if (!activeDialog || captureHotkey) return;
 
     if (event.key === "Escape") {
       event.preventDefault();
@@ -1308,6 +1625,7 @@ function setupEvents() {
   document.querySelector("#power-button").addEventListener("click", () => void toggleAudio());
   document.querySelector("#bypass-button").addEventListener("click", () => setBypass(!params.bypass));
   document.querySelector("#refresh-devices").addEventListener("click", () => void refreshDevices());
+  document.querySelector("#configure-virtual-output").addEventListener("click", () => void configureVirtualOutput());
   ["input-device", "output-device", "latency-select"].forEach((id) => {
     document.querySelector(`#${id}`).addEventListener("change", updateRoutingFromControls);
   });
@@ -1416,11 +1734,25 @@ async function connectCore() {
       setAudioStatus(status.message || t("core_unavailable"), false, true);
       return;
     }
-    const [loadedParams, presetList, deviceList] = await Promise.all([
+    const [loadedParams, presetList] = await Promise.all([
       coreRequest("get_params"),
       coreRequest("list_presets"),
-      coreRequest("list_devices"),
     ]);
+    let virtualOutputSetup = {
+      supported: false,
+      available: false,
+      created: false,
+      canRetry: false,
+      message: null,
+    };
+    try {
+      virtualOutputSetup = await coreRequest("ensure_virtual_output");
+    } catch (error) {
+      virtualOutputSetup.message = String(error);
+    }
+    virtualOutputSetupSupported = virtualOutputSetup.supported === true;
+    virtualOutputSetupCanRetry = virtualOutputSetup.canRetry === true;
+    const deviceList = await coreRequest("list_devices");
     const saved = readStoredVoiceSettings();
     const savedParams = Object.fromEntries(Object.entries(loadedParams).flatMap(([key, fallback]) => {
       const value = saved.params?.[key];
@@ -1444,7 +1776,11 @@ async function connectCore() {
     renderPresets();
     renderDevices();
     renderControlValues();
-    setAudioStatus(t("stopped"), false);
+    if (virtualOutputSetup.supported && !virtualOutputSetup.available) {
+      setAudioStatus(virtualOutputSetup.message || t("virtual_output_setup_failed"), false, true);
+    } else {
+      setAudioStatus(t("stopped"), false);
+    }
     window.setInterval(() => void pollMeters(), 180);
   } catch (error) {
     coreConnected = false;

@@ -49,9 +49,12 @@ streaming. O shell desktop é Tauri 2; o frontend é Vite/JavaScript.
   presets, início/parada de áudio e medidores.
 - `src-back/src/lib.rs` expõe `core_request` com allowlist. Ao adicionar ou
   renomear uma operação, atualize tanto o dispatch Python quanto essa allowlist.
-- A bancada controla o core via RPC. A **Saída** define o destino principal;
-  **Escutar minha voz** usa a saída padrão do sistema sem duplicar o sinal
-  quando os destinos coincidem. O atalho de voz original vale com a janela focada.
+- A bancada controla o core via RPC. A **Saída virtual** define o destino
+  principal do áudio processado; não altere a saída padrão nem o volume do
+  sistema. No Linux, se necessário, o core cria um sink temporário via `pactl`
+  e o remove ao encerrar. **Escutar minha voz** monitora pela saída padrão sem
+  duplicar o sinal quando os destinos coincidem. O atalho de voz original é
+  global; em Wayland, o compositor pode solicitar autorização para vinculá-lo.
 - Mantenha stdout do core reservado às respostas JSON Lines; logs e erros devem
   ir para stderr para não corromper o protocolo.
 - O updater consulta `latest.json` no GitHub e instala pacotes assinados após
@@ -67,6 +70,8 @@ Execute os comandos na raiz:
   do ambiente `.venv` pelo `VOXCRAFT_PYTHON`.
 - `python scripts/check.py`: compila os fontes Python, verifica a
   sintaxe JavaScript e executa `cargo check`/`cargo fmt --check`.
+- `python -m unittest discover -s internal/core/tests -v`: executa os testes
+  unitários/regressivos do roteamento de áudio.
 - `python scripts/build.py`: compila para o sistema atual.
 - `python scripts/build.py --target linux`: gera bundles `.deb` e `.rpm`.
 - `python scripts/build.py --target windows`: gera bundle NSIS no Windows.
@@ -76,11 +81,12 @@ Os alvos de build do Tauri que assinam/publicam updater exigem as variáveis
 `UPDATER_PUBLIC_KEY` e `SIGNING_PRIVATE_KEY`; não grave chaves ou tokens no
 repositório.
 
-Não há diretório de testes automatizados no checkout atual. `check` é uma
-verificação estática/compilação, não uma suíte de testes funcionais; áudio e
-dispositivos exigem validação manual em um sistema com os dispositivos
-apropriados. `python internal/core/app.py` inicia o servidor JSON Lines e
-aguarda comandos em stdin; para abrir o aplicativo, use `python scripts/dev.py`.
+Os testes do core usam `unittest` e não precisam de uma dependência adicional.
+`check` continua sendo uma verificação estática/compilação, não uma suíte de
+testes funcionais; áudio e dispositivos exigem validação manual em um sistema
+com os dispositivos apropriados. `python internal/core/app.py` inicia o
+servidor JSON Lines e aguarda comandos em stdin; para abrir o aplicativo, use
+`python scripts/dev.py`.
 
 ## Cuidados ao alterar
 
@@ -97,9 +103,10 @@ aguarda comandos em stdin; para abrir o aplicativo, use `python scripts/dev.py`.
   presets salvem ou substituam esses campos. Voz Original ignora os efeitos,
   mas mantém os ganhos.
 - A versão aparece em mais de um lugar: `internal/core/src/__init__.py`,
-  `internal/client/package.json`, `internal/client/src-back/Cargo.toml`,
-  `internal/client/src-back/tauri.conf.json` e `docs/app.js`. Confira a
-  consistência ao alterar uma versão.
+  `internal/client/package.json` e `package-lock.json`,
+  `internal/client/src-back/Cargo.toml` e `Cargo.lock`,
+  `internal/client/src-back/tauri.conf.json`, `docs/app.js` e os valores
+  iniciais em `docs/index.html`. Confira a consistência ao preparar uma release.
 - `node_modules/`, `dist/`, `target/`, caches Python e
   `internal/client/src-back/gen/` são dependências/artefatos gerados; não os
   trate como fonte de verdade.

@@ -1,6 +1,6 @@
 (() => {
   const REPO = "CakeSweet/voxcraft";
-  const DEFAULT_VERSION = "2.2.0";
+  const DEFAULT_VERSION = "2.3.0";
 
   const PRESET_GROUPS = [
     {
@@ -75,7 +75,7 @@
         "Alterne entre voz modificada e voz natural com uma tecla ou botão lateral do mouse (como F9) no modo Alternar ou Segurar.",
       feat_3_title: "Roteamento para Discord, OBS e Jogos",
       feat_3_desc:
-        "Envie sua voz processada para o VB-Cable no Windows ou sink virtual no Linux com monitoramento local separado nos seus fones via WASAPI, DirectSound e MME.",
+        "Envie sua voz processada para o VB-Cable no Windows ou use o sink virtual que o app configura no PipeWire/PulseAudio no Linux, sem alterar a saída padrão do sistema.",
       presets_kicker: "02. Biblioteca Nativa",
       presets_title: "24 presets prontos de fábrica e vozes personalizadas ilimitadas.",
       dl_kicker: "03. Instalação e Releases",
@@ -118,7 +118,7 @@
         "Switch between modulated and natural voice with a key or side mouse button (such as F9) in Toggle or Hold mode.",
       feat_3_title: "Routing for Discord, OBS & Games",
       feat_3_desc:
-        "Route processed voice into VB-Cable on Windows or virtual sinks on Linux with separate headphone monitoring over WASAPI, DirectSound, and MME.",
+        "Route processed voice into VB-Cable on Windows or use the virtual sink VoxCraft configures through PipeWire/PulseAudio on Linux, without changing the system's default output.",
       presets_kicker: "02. Built-in Library",
       presets_title: "24 factory voice presets plus unlimited custom profiles.",
       dl_kicker: "03. Releases & Installation",
@@ -161,7 +161,7 @@
         "Alterna entre voz con efecto y voz natural con una tecla o botón lateral del ratón (como F9) en modo Alternar o Mantener.",
       feat_3_title: "Listo para Discord, OBS y Juegos",
       feat_3_desc:
-        "Envía la voz procesada a VB-Cable en Windows o sinks virtuales en Linux con monitoreo independiente en tus auriculares vía WASAPI, DirectSound y MME.",
+        "Envía la voz procesada a VB-Cable en Windows o usa el sink virtual que VoxCraft configura mediante PipeWire/PulseAudio en Linux, sin cambiar la salida predeterminada del sistema.",
       presets_kicker: "02. Biblioteca Nativa",
       presets_title: "24 presets integrados y voces personalizadas ilimitadas.",
       dl_kicker: "03. Instalación y Releases",
@@ -305,9 +305,9 @@
           es: `${tag} · Windows 10 / 11 (x64)`,
         },
         desc: {
-          pt: "Inclui o core de áudio. Para roteamento virtual no Discord ou OBS, instale o VB-Audio Virtual Cable separadamente.",
-          en: "Includes the audio core. For virtual audio routing to Discord or OBS, install VB-Audio Virtual Cable separately.",
-          es: "Incluye el motor de audio. Para el enrutamiento virtual en Discord u OBS, instala VB-Audio Virtual Cable por separado.",
+          pt: "No Windows, o instalador instala o VB-Audio Virtual Cable obrigatório após aprovação do administrador. No Discord, selecione CABLE Output como microfone.",
+          en: "On Windows, the installer installs the required VB-Audio Virtual Cable after administrator approval. In Discord, select CABLE Output as your microphone.",
+          es: "En Windows, el instalador instala el VB-Audio Virtual Cable obligatorio tras la aprobación del administrador. En Discord, selecciona CABLE Output como micrófono.",
         },
         buttons: [
           {
@@ -320,7 +320,7 @@
             asset: resolveAssetUrl("VoxCraftStudio_Setup", `VoxCraftStudio_Setup_v${v}.exe`),
           },
         ],
-        cmd: "winget install VB-Audio.VBCABLE  # opcional para roteamento virtual",
+        cmd: "winget install VB-Audio.VBCABLE  # dependência obrigatória do VoxCraft no Windows",
       },
       deb: {
         title: {

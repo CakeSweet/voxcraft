@@ -28,9 +28,9 @@ usuários de builds já instalados reinstalem um pacote que confie na chave nova
 Para testar a compilação no GitHub **sem publicar**, use **Run workflow** na
 aba Actions. Os instaladores assinados ficam disponíveis como artifacts do job.
 
-1. Use uma versão ainda não publicada e mantenha `APP_VERSION` em
-   `internal/core/src/__init__.py` e a versão em
-   `internal/client/src-back/tauri.conf.json` iguais.
+1. Use uma versão ainda não publicada e mantenha os metadados de versão do
+   core, do `package.json`/`package-lock.json`, do `Cargo.toml`/`Cargo.lock`,
+   do `tauri.conf.json` e os valores iniciais do site iguais.
 2. Envie uma tag `vMAJOR.MINOR.PATCH` para o commit da release.
 3. O Actions compila NSIS, `.deb` e `.rpm` x86-64 com o core Python incluído.
    A release só é publicada depois que os três instaladores e as respectivas
@@ -46,7 +46,7 @@ autorização do sistema.
 ## Build local
 
 Com as dependências de `python scripts/install.py` instaladas, instale também
-`scripts/requirements-build.txt` no mesmo ambiente Python. Se a `.venv` usar
+`scripts/requirements.txt` no mesmo ambiente Python. Se a `.venv` usar
 uma versão não suportada pelo PyInstaller, use `PYTHON` para indicar um
 interpretador com as dependências do core e do build já instaladas. A CI usa
 Python 3.12.

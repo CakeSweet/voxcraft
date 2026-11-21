@@ -12,7 +12,7 @@ class DSPParams:
     output_gain_db: float = 0.0
 
     # Noise Gate & Compressor (Limpeza para Discord)
-    gate_enabled: bool = False
+    gate_enabled: bool = True
     gate_threshold_db: float = -44.0
     comp_enabled: bool = True
     comp_threshold_db: float = -18.0
@@ -498,47 +498,43 @@ class RealTimeDSPEngine:
         n = len(x)
 
         # 2. Noise Gate (antes de distorção/reverb para cauda natural)
-        if p.gate_enabled:
-            rms = float(np.sqrt(np.mean(x * x) + 1e-12))
-            rms_db = 20.0 * np.log10(rms)
-            hold_blocks = max(1, int(0.14 * self.sr / n))
-            if rms_db >= p.gate_threshold_db:
-                self._gate_hold_counter = hold_blocks
-                target_g = 1.0
-                self.gate_is_open = True
-            elif self._gate_hold_counter > 0:
-                self._gate_hold_counter -= 1
-                target_g = 1.0
-                self.gate_is_open = True
-            else:
-                target_g = 0.0005  # -66 dB
-                self.gate_is_open = False
-
-            coeff = 0.45 if target_g > self._gate_gain else 0.22
-            next_g = self._gate_gain + coeff * (target_g - self._gate_gain)
-            ramp = np.linspace(self._gate_gain, next_g, n, dtype=np.float32)
-            x *= ramp
-            self._gate_gain = float(next_g)
-        else:
+        rms = float(np.sqrt(np.mean(x * x) + 1e-12))
+        rms_db = 20.0 * np.log10(rms)
+        hold_blocks = max(1, int(0.14 * self.sr / n))
+        if rms_db >= p.gate_threshold_db:
+            self._gate_hold_counter = hold_blocks
+            target_g = 1.0
             self.gate_is_open = True
+        elif self._gate_hold_counter > 0:
+            self._gate_hold_counter -= 1
+            target_g = 1.0
+            self.gate_is_open = True
+        else:
+            target_g = 0.0005  # -66 dB
+            self.gate_is_open = False
+
+        coeff = 0.45 if target_g > self._gate_gain else 0.22
+        next_g = self._gate_gain + coeff * (target_g - self._gate_gain)
+        ramp = np.linspace(self._gate_gain, next_g, n, dtype=np.float32)
+        x *= ramp
+        self._gate_gain = float(next_g)
 
         # 3. Compressor
-        if p.comp_enabled:
-            rms = float(np.sqrt(np.mean(x * x) + 1e-12))
-            lvl_db = 20.0 * np.log10(rms)
-            if lvl_db > p.comp_threshold_db:
-                over = lvl_db - p.comp_threshold_db
-                reduced_db = over * (1.0 - 1.0 / max(1.1, p.comp_ratio))
-                target_cg = 10.0 ** (-reduced_db / 20.0)
-            else:
-                target_cg = 1.0
-            # Auto makeup leve
-            makeup = 10.0 ** (min(8.0, max(0.0, (-p.comp_threshold_db - 10.0) * 0.22)) / 20.0)
-            target_cg *= makeup
-            c_coeff = 0.35 if target_cg < self._comp_gain else 0.12
-            next_cg = self._comp_gain + c_coeff * (target_cg - self._comp_gain)
-            x *= np.linspace(self._comp_gain, next_cg, n, dtype=np.float32)
-            self._comp_gain = float(next_cg)
+        rms = float(np.sqrt(np.mean(x * x) + 1e-12))
+        lvl_db = 20.0 * np.log10(rms)
+        if lvl_db > p.comp_threshold_db:
+            over = lvl_db - p.comp_threshold_db
+            reduced_db = over * (1.0 - 1.0 / max(1.1, p.comp_ratio))
+            target_cg = 10.0 ** (-reduced_db / 20.0)
+        else:
+            target_cg = 1.0
+        # Auto makeup leve
+        makeup = 10.0 ** (min(8.0, max(0.0, (-p.comp_threshold_db - 10.0) * 0.22)) / 20.0)
+        target_cg *= makeup
+        c_coeff = 0.35 if target_cg < self._comp_gain else 0.12
+        next_cg = self._comp_gain + c_coeff * (target_cg - self._comp_gain)
+        x *= np.linspace(self._comp_gain, next_cg, n, dtype=np.float32)
+        self._comp_gain = float(next_cg)
 
         # 4. Pitch Shifter (Alterar Tom estilo Audacity)
         total_st = p.pitch_semitones + p.pitch_cents / 100.0

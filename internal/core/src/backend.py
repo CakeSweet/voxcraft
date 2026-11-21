@@ -29,7 +29,11 @@ class VoxCraftCore:
 
     @staticmethod
     def _device_data(device: Any) -> dict[str, Any]:
-        return {**asdict(device), "label": device.label}
+        return {
+            **asdict(device),
+            "label": device.label,
+            "isVirtualOutput": device.is_virtual_output,
+        }
 
     def _devices(self, refresh: bool = False) -> dict[str, list[dict[str, Any]]]:
         if refresh:
@@ -53,6 +57,10 @@ class VoxCraftCore:
             raise ValueError(f"Parâmetros desconhecidos: {', '.join(sorted(unknown))}")
 
         current.update(raw_params)
+        # Mantém compatibilidade com preferências antigas, mas não permite
+        # desativar a dinâmica global pela API do core.
+        current["gate_enabled"] = True
+        current["comp_enabled"] = True
         self.params = DSPParams(**current)
         self.engine.update_params(self.params)
         return asdict(self.params)
@@ -85,6 +93,8 @@ class VoxCraftCore:
             return self._devices()
         if method == "refresh_devices":
             return self._devices(refresh=True)
+        if method == "ensure_virtual_output":
+            return self.router.ensure_linux_virtual_output()
         if method == "get_params":
             return asdict(self.params)
         if method == "set_params":
@@ -121,6 +131,11 @@ class VoxCraftCore:
             blocksize = int(params.get("blocksize", 512))
             if blocksize not in (256, 512, 1024):
                 raise ValueError("'blocksize' precisa ser 256, 512 ou 1024.")
+            if not AudioRouter.is_virtual_output(output_index):
+                raise ValueError(
+                    "Selecione uma saída virtual para enviar a voz processada "
+                    "sem reproduzi-la nos alto-falantes."
+                )
             monitor_index = params.get("monitor_index")
             if monitor_index is not None:
                 monitor_index = int(monitor_index)
@@ -166,6 +181,7 @@ class VoxCraftCore:
 
     def close(self) -> None:
         self.router.stop()
+        self.router.release_linux_virtual_output()
 
 
 def run_stdio_server() -> None:

@@ -61,8 +61,10 @@ Original Voice bypasses effects but keeps the configured gains.
 ### Windows
 
 1. Download `VoxCraftStudio_Setup_v<version>.exe` from [Releases](../../releases).
-2. Run the installer and launch **VoxCraft Studio**.
-3. For virtual audio routing, install VB-Audio Virtual Cable separately.
+2. Run the installer and approve the Windows administrator prompt to install
+   the required VB-Audio Virtual Cable. If approval is denied or installation
+   fails, VoxCraft setup is canceled.
+3. Launch **VoxCraft Studio**.
 
 ### Linux (`.deb` / `.rpm`)
 
@@ -79,15 +81,21 @@ Original Voice bypasses effects but keeps the configured gains.
     voxcraft-app
    ```
 
+   With PipeWire/PulseAudio and `pactl` available, VoxCraft creates a temporary
+   virtual sink for the current session if it cannot find one. This does not
+   change the system's default output or volume.
+
 ## Routing to Discord & Games
 
 On Windows, use [VB-Audio Virtual Cable](https://vb-audio.com/Cable).
-On Linux, select a configured virtual sink as **Output** and its monitor
-source as the input in the receiving app.
+On Linux, VoxCraft creates a virtual sink automatically when needed and when
+PipeWire/PulseAudio is available through `pactl`. Select the sink's monitor
+source as the input in Discord or the receiving app.
 
 **Windows example:**
 
-1. Install VB-Audio Virtual Cable.
+1. The VoxCraft installer installs VB-Audio Virtual Cable as a required
+   component (and skips it if it is already installed).
 2. In VoxCraft Studio:
 
 | Setting | Value |
@@ -183,8 +191,10 @@ em Configurações. Voz Original ignora os efeitos, mas mantém os ganhos config
 ### Windows
 
 1. Baixe `VoxCraftStudio_Setup_v<versão>.exe` na página de [Releases](../../releases).
-2. Execute o instalador e abra o **VoxCraft Studio**.
-3. Para roteamento virtual, instale o VB-Audio Virtual Cable separadamente.
+2. Execute o instalador e autorize a solicitação de administrador do Windows
+   para instalar o VB-Audio Virtual Cable obrigatório. Se a aprovação for
+   negada ou a instalação falhar, a instalação do VoxCraft será cancelada.
+3. Abra o **VoxCraft Studio**.
 
 ### Linux (`.deb` / `.rpm`)
 
@@ -198,18 +208,25 @@ em Configurações. Voz Original ignora os efeitos, mas mantém os ganhos config
 2. Abra o **VoxCraft Studio** pelo menu de aplicativos ou execute:
 
    ```bash
-   voxcraft-app
+    voxcraft-app
    ```
+
+   Com PipeWire/PulseAudio e `pactl` disponíveis, o VoxCraft cria um sink
+   virtual temporário para a sessão se não encontrar um. Isso não altera a
+   saída padrão nem o volume do sistema.
 
 ## Configuração no Discord e Jogos
 
 No Windows, use o [VB-Audio Virtual Cable](https://vb-audio.com/Cable).
-No Linux, selecione um destino virtual já configurado em **Saída** e a fonte
-de monitoramento dele como entrada no aplicativo que recebe o áudio.
+No Linux, o VoxCraft cria um sink virtual automaticamente quando necessário e
+quando PipeWire/PulseAudio está disponível via `pactl`. No Discord ou no
+aplicativo que recebe o áudio, selecione a fonte de monitoramento desse sink
+como entrada.
 
 **Exemplo no Windows:**
 
-1. Instale o VB-Audio Virtual Cable.
+1. O instalador do VoxCraft instala o VB-Audio Virtual Cable como componente
+   obrigatório (e não o reinstala se já estiver instalado).
 2. No VoxCraft Studio:
 
 | Opção | Valor |

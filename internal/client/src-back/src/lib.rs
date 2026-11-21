@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+use futures_util::StreamExt;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
@@ -9,7 +11,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, State,
+    Emitter, Manager, State,
 };
 
 struct CoreProcess {
@@ -202,6 +204,29 @@ impl CoreState {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct PortalShortcutState {
+    task: Mutex<Option<PortalShortcutTask>>,
+}
+
+#[cfg(target_os = "linux")]
+struct PortalShortcutTask {
+    cancel: tokio::sync::oneshot::Sender<()>,
+    join: tauri::async_runtime::JoinHandle<()>,
+}
+
+#[cfg(target_os = "linux")]
+impl PortalShortcutState {
+    fn shutdown(&self) {
+        if let Ok(mut task) = self.task.lock() {
+            if let Some(task) = task.take() {
+                let _ = task.cancel.send(());
+            }
+        }
+    }
+}
+
 struct CoreShutdown(Arc<CoreState>);
 
 impl tauri::Resource for CoreShutdown {}
@@ -249,6 +274,7 @@ fn core_request(
     const ALLOWED_METHODS: &[&str] = &[
         "list_devices",
         "refresh_devices",
+        "ensure_virtual_output",
         "get_params",
         "set_params",
         "list_presets",
@@ -269,6 +295,241 @@ fn core_request(
 #[tauri::command]
 fn updater_is_configured() -> bool {
     option_env!("UPDATER_PUBLIC_KEY").is_some_and(|key| !key.trim().is_empty())
+}
+
+#[tauri::command]
+fn is_wayland_session() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let forced_x11 = std::env::var("GDK_BACKEND").is_ok_and(|backend| {
+            backend
+                .split(',')
+                .next()
+                .is_some_and(|name| name.trim().eq_ignore_ascii_case("x11"))
+        });
+        let wayland_session = std::env::var("XDG_SESSION_TYPE")
+            .is_ok_and(|session| session.eq_ignore_ascii_case("wayland"))
+            || std::env::var_os("WAYLAND_DISPLAY").is_some();
+        return wayland_session && !forced_x11;
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn portal_preferred_trigger(shortcut: &str) -> Option<String> {
+    let tokens: Vec<_> = shortcut.split('+').collect();
+    let (key_token, modifier_tokens) = tokens.split_last()?;
+    let mut modifiers = Vec::with_capacity(modifier_tokens.len());
+    for modifier in modifier_tokens {
+        modifiers.push(match modifier.to_ascii_uppercase().as_str() {
+            "CTRL" | "CONTROL" => "CTRL",
+            "ALT" | "OPTION" => "ALT",
+            "SHIFT" => "SHIFT",
+            "SUPER" | "META" | "CMD" | "COMMAND" => "LOGO",
+            _ => return None,
+        });
+    }
+
+    let key = match *key_token {
+        " " | "Space" | "space" => "space".to_string(),
+        "Enter" | "Return" => "Return".to_string(),
+        "Escape" | "Esc" => "Escape".to_string(),
+        "Backspace" | "BackSpace" => "BackSpace".to_string(),
+        "Tab" => "Tab".to_string(),
+        "ArrowUp" | "Up" => "Up".to_string(),
+        "ArrowDown" | "Down" => "Down".to_string(),
+        "ArrowLeft" | "Left" => "Left".to_string(),
+        "ArrowRight" | "Right" => "Right".to_string(),
+        "PageUp" | "Page_Up" => "Page_Up".to_string(),
+        "PageDown" | "Page_Down" => "Page_Down".to_string(),
+        "Home" | "End" | "Insert" | "Delete" => key_token.to_string(),
+        "CapsLock" | "Caps_Lock" => "Caps_Lock".to_string(),
+        "NumLock" | "Num_Lock" => "Num_Lock".to_string(),
+        "ScrollLock" | "Scroll_Lock" => "Scroll_Lock".to_string(),
+        "Backquote" | "grave" => "grave".to_string(),
+        "Backslash" | "backslash" => "backslash".to_string(),
+        "BracketLeft" | "bracketleft" => "bracketleft".to_string(),
+        "BracketRight" | "bracketright" => "bracketright".to_string(),
+        "Comma" | "comma" => "comma".to_string(),
+        "Equal" | "equal" => "equal".to_string(),
+        "Minus" | "minus" => "minus".to_string(),
+        "Period" | "period" => "period".to_string(),
+        "Quote" | "apostrophe" => "apostrophe".to_string(),
+        "Semicolon" | "semicolon" => "semicolon".to_string(),
+        "Slash" | "slash" => "slash".to_string(),
+        "NumpadAdd" => "KP_Add".to_string(),
+        "NumpadSubtract" => "KP_Subtract".to_string(),
+        "NumpadMultiply" => "KP_Multiply".to_string(),
+        "NumpadDivide" => "KP_Divide".to_string(),
+        "NumpadDecimal" => "KP_Decimal".to_string(),
+        "NumpadEnter" => "KP_Enter".to_string(),
+        "NumpadEqual" => "KP_Equal".to_string(),
+        _ if key_token.strip_prefix("Key").is_some_and(|letter| {
+            letter.len() == 1 && letter.as_bytes()[0].is_ascii_alphabetic()
+        }) =>
+        {
+            key_token[3..].to_ascii_lowercase()
+        }
+        _ if key_token
+            .strip_prefix("Digit")
+            .is_some_and(|digit| digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit()) =>
+        {
+            key_token[5..].to_string()
+        }
+        _ if key_token
+            .strip_prefix("Numpad")
+            .and_then(|digit| digit.parse::<u8>().ok())
+            .is_some_and(|digit| digit <= 9) =>
+        {
+            format!("KP_{}", &key_token[6..])
+        }
+        _ if key_token
+            .strip_prefix('F')
+            .and_then(|number| number.parse::<u8>().ok())
+            .is_some_and(|number| (1..=35).contains(&number)) =>
+        {
+            key_token.to_string()
+        }
+        _ if key_token.len() == 1 && key_token.as_bytes()[0].is_ascii_alphanumeric() => {
+            key_token.to_ascii_lowercase()
+        }
+        _ => return None,
+    };
+    let mut trigger = modifiers.join("+");
+    if !trigger.is_empty() {
+        trigger.push('+');
+    }
+    trigger.push_str(&key);
+    Some(trigger)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod portal_shortcut_tests {
+    use super::portal_preferred_trigger;
+
+    #[test]
+    fn maps_modifier_chords_to_portal_trigger_syntax() {
+        assert_eq!(
+            portal_preferred_trigger("CTRL+SHIFT+KeyA").as_deref(),
+            Some("CTRL+SHIFT+a")
+        );
+        assert_eq!(
+            portal_preferred_trigger("SUPER+ALT+F9").as_deref(),
+            Some("LOGO+ALT+F9")
+        );
+        assert_eq!(
+            portal_preferred_trigger("CTRL+Digit1").as_deref(),
+            Some("CTRL+1")
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+async fn set_wayland_global_shortcut(
+    app: tauri::AppHandle,
+    state: State<'_, PortalShortcutState>,
+    shortcut: Option<String>,
+) -> Result<(), String> {
+    let previous = state
+        .task
+        .lock()
+        .map_err(|_| "estado do atalho global indisponível".to_string())?
+        .take();
+    if let Some(previous) = previous {
+        let _ = previous.cancel.send(());
+        let _ = previous.join.await;
+    }
+
+    let Some(shortcut) = shortcut else {
+        return Ok(());
+    };
+    if !is_wayland_session() {
+        return Err("o portal de atalhos só é usado em sessões Wayland".into());
+    }
+
+    use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
+
+    const SHORTCUT_ID: &str = "com.cakesweet.voxcraft.toggle_bypass";
+    let portal = GlobalShortcuts::new()
+        .await
+        .map_err(|error| format!("não foi possível conectar ao portal de atalhos: {error}"))?;
+    let session = portal
+        .create_session(Default::default())
+        .await
+        .map_err(|error| format!("não foi possível criar a sessão do portal: {error}"))?;
+    let mut activated = portal
+        .receive_activated()
+        .await
+        .map_err(|error| format!("não foi possível ouvir ativações do portal: {error}"))?;
+    let mut deactivated = portal
+        .receive_deactivated()
+        .await
+        .map_err(|error| format!("não foi possível ouvir liberações do portal: {error}"))?;
+
+    let trigger = portal_preferred_trigger(&shortcut);
+    let definition = NewShortcut::new(
+        SHORTCUT_ID,
+        "Atalho do VoxCraft Studio para alternar a voz original",
+    )
+    .preferred_trigger(trigger.as_deref());
+    let request = portal
+        .bind_shortcuts(&session, &[definition], None, Default::default())
+        .await
+        .map_err(|error| format!("não foi possível solicitar o atalho ao portal: {error}"))?;
+    let response = request
+        .response()
+        .map_err(|error| format!("o portal não confirmou o atalho: {error}"))?;
+    if !response
+        .shortcuts()
+        .iter()
+        .any(|bound| bound.id() == SHORTCUT_ID)
+    {
+        return Err("o compositor não vinculou o atalho global solicitado".into());
+    }
+
+    let (cancel, mut cancel_rx) = tokio::sync::oneshot::channel();
+    let event_app = app.clone();
+    let join = tauri::async_runtime::spawn(async move {
+        let _portal = portal;
+        let _session = session;
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => break,
+                event = activated.next() => match event {
+                    Some(event) if event.shortcut_id() == SHORTCUT_ID => {
+                        let _ = event_app.emit("voxcraft-global-hotkey", json!({ "state": "Pressed" }));
+                    }
+                    Some(_) => {}
+                    None => break,
+                },
+                event = deactivated.next() => match event {
+                    Some(event) if event.shortcut_id() == SHORTCUT_ID => {
+                        let _ = event_app.emit("voxcraft-global-hotkey", json!({ "state": "Released" }));
+                    }
+                    Some(_) => {}
+                    None => break,
+                },
+            }
+        }
+    });
+
+    *state
+        .task
+        .lock()
+        .map_err(|_| "estado do atalho global indisponível".to_string())? =
+        Some(PortalShortcutTask { cancel, join });
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn set_wayland_global_shortcut(_shortcut: Option<String>) -> Result<(), String> {
+    Err("o portal de atalhos Wayland só está disponível no Linux".into())
 }
 
 #[tauri::command]
@@ -345,11 +606,20 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    let builder = if is_wayland_session() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_global_shortcut::Builder::new().build())
+    };
+    let builder = builder
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
             core_request,
             updater_is_configured,
+            is_wayland_session,
+            set_wayland_global_shortcut,
             updater_target,
             restart_app
         ])
@@ -358,6 +628,8 @@ pub fn run() {
             // The Windows updater clears Tauri resources before exiting to run NSIS.
             app.resources_table().add(CoreShutdown(Arc::clone(&core)));
             app.manage(core);
+            #[cfg(target_os = "linux")]
+            app.manage(PortalShortcutState::default());
             setup_tray(app)?;
             Ok(())
         });
@@ -377,6 +649,8 @@ pub fn run() {
     app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
             app_handle.state::<Arc<CoreState>>().shutdown();
+            #[cfg(target_os = "linux")]
+            app_handle.state::<PortalShortcutState>().shutdown();
         }
     });
 }
