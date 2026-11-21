@@ -1,0 +1,19 @@
+{
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.venv": true,
+    "**/venv": true,
+    "**/node_modules": true,
+    "**/build": true,
+    "**/dist": true,
+    "**/target": true,
+    "**/Output": true,
+    "**/coverage": true,
+    "**/.next": true,
+    "**/.turbo": true,
+    "internal/client/src-back/gen": true
+  }
+}
