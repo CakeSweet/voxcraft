@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, font as tkfont, messagebox, simpledialog
+from tkinter import font as tkfont, messagebox, simpledialog
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -605,7 +605,7 @@ class VoxCraftApp(ctk.CTk):
         # Cache de estado da UI e controle assíncrono de áudio (evita congelamentos/tela branca)
         self._audio_op_seq = 0
         self._audio_worker_lock = threading.Lock()
-        self._update_win = None
+        self._updating_app = False
         self._discord_win = None
         self._wave_mid_id = None
         self._wave_line_id = None
@@ -617,6 +617,7 @@ class VoxCraftApp(ctk.CTk):
         self._last_gate_open: bool | None = None
         self._last_wave_idle = False
         self._last_ui_hidden = False
+        self._last_map_ts = 0.0
         self._eq_redraw_job = None
         self._last_eq_sig = None
         self._status_role = "text_muted"
@@ -774,6 +775,12 @@ class VoxCraftApp(ctk.CTk):
             )
         return w
 
+    def _box(self, parent, bg_role: str = "card_bg", **kw) -> tk.Frame:
+        th = self._c()
+        w = tk.Frame(parent, bg=th[bg_role], bd=0, highlightthickness=0, **kw)
+        self._reg_theme(w, lambda t, wd=w, br=bg_role: wd.configure(bg=t[br]))
+        return w
+
     def _scroll(self, parent, role: str = "transparent", **kw) -> ctk.CTkScrollableFrame:
         th = self._c()
         if role == "panel":
@@ -843,7 +850,7 @@ class VoxCraftApp(ctk.CTk):
         w = ctk.CTkLabel(parent, text=text, font=self._fonts[font_key], text_color=th[color_role], **kw)
         if is_key:
             self._reg_i18n(lambda wd=w, k=key_or_text: wd.configure(text=self._t(k)))
-        self._reg_theme(w, lambda t, wd=w, cr=color_role: wd.configure(text_color=t[cr]))
+        self._reg_theme(w, lambda t, wd=w, cr=color_role: wd.configure(text_color=t[cr], bg_color="transparent"))
         return w
 
     def _switch(self, parent, key_or_text: str, variable, command, font_key: str | None = "sm_m", is_key: bool = True, progress_color: str | None = None) -> ctk.CTkSwitch:
@@ -875,6 +882,7 @@ class VoxCraftApp(ctk.CTk):
                     button_color=t["switch_knob"],
                     button_hover_color=t["switch_knob_hover"],
                     text_color=t["text_primary"],
+                    bg_color="transparent",
                 ),
             )
         else:
@@ -885,6 +893,7 @@ class VoxCraftApp(ctk.CTk):
                     button_color=t["switch_knob"],
                     button_hover_color=t["switch_knob_hover"],
                     text_color=t["text_primary"],
+                    bg_color="transparent",
                 ),
             )
         return w
@@ -927,6 +936,7 @@ class VoxCraftApp(ctk.CTk):
                     hover_color=t[hr] if hr else (hv or t["control_hover"]),
                     text_color=t["text_primary"],
                     border_color=t["control_border"],
+                    bg_color="transparent",
                 ),
             )
         else:
@@ -936,6 +946,7 @@ class VoxCraftApp(ctk.CTk):
                     fg_color=t["control_bg"],
                     hover_color=t[hr] if hr else (hv or t["control_hover"]),
                     text_color=t["text_primary"],
+                    bg_color="transparent",
                 ),
             )
         return w
@@ -968,6 +979,7 @@ class VoxCraftApp(ctk.CTk):
                 dropdown_hover_color=t["dropdown_hover"],
                 dropdown_text_color=t["dropdown_text"],
                 text_color=t["text_primary"],
+                bg_color="transparent",
             ),
         )
         return w
@@ -1246,6 +1258,7 @@ class VoxCraftApp(ctk.CTk):
 
         self.main_container.pack(fill="both", expand=True)
         self.update_idletasks()
+        self._force_win32_repaint()
         self._apply_window_icon()
         if IS_LINUX:
             self._apply_linux_window_chrome()
@@ -1255,9 +1268,83 @@ class VoxCraftApp(ctk.CTk):
         self.bind("<Control-q>", lambda _e: self._quit_app())
         self._schedule_ui_loop()
 
+    def _get_win32_hwnd(self) -> int:
+        if sys.platform != "win32":
+            return 0
+        try:
+            wid = int(self.winfo_id())
+            if not wid:
+                return 0
+            parent = int(ctypes.windll.user32.GetParent(wid))
+            return parent or wid
+        except Exception:
+            return 0
+
+    def _force_win32_repaint(self):
+        if sys.platform != "win32":
+            return
+        hwnd = self._get_win32_hwnd()
+        if not hwnd:
+            return
+        try:
+            # RDW_INVALIDATE (0x0001) | RDW_ALLCHILDREN (0x0080) | RDW_UPDATENOW (0x0100)
+            ctypes.windll.user32.RedrawWindow(hwnd, None, None, 0x0181)
+        except Exception:
+            pass
+        try:
+            # Em Win32 Tk, WM_PAINT agenda Display* em Tcl_DoWhenIdle; drenar aqui evita retângulos pretos antes do DwmFlush.
+            self.update_idletasks()
+        except Exception:
+            pass
+        try:
+            ctypes.windll.dwmapi.DwmFlush()
+        except Exception:
+            pass
+
+    def _flush_restore_paint(self):
+        if self._is_quitting or self._rebuilding_ui:
+            return
+        try:
+            if self.state() == "iconic" or not self.winfo_viewable():
+                return
+        except Exception:
+            pass
+
+        if self._ui_loop_job is not None:
+            try:
+                self.after_cancel(self._ui_loop_job)
+            except Exception:
+                pass
+            self._ui_loop_job = None
+
+        self._last_ui_hidden = True
+        self._last_in_norm = -1.0
+        self._last_out_norm = -1.0
+        self._last_gate_open = None
+        self._last_wave_idle = False
+        if self._active_tab_key == "tab_eq":
+            self._schedule_eq_redraw()
+
+        try:
+            self._refresh_live_meters_and_wave(force_refresh=True)
+        except Exception:
+            pass
+        try:
+            self.update_idletasks()
+        except Exception:
+            pass
+        self._force_win32_repaint()
+
+        if not self._is_quitting:
+            self._ui_loop_job = self.after(60, self._schedule_ui_loop)
+
     def _on_window_map(self, event=None):
         if event is not None and event.widget is not self:
             return
+        now = time.monotonic()
+        if event is not None and (now - self._last_map_ts) < 0.08:
+            return
+        self._last_map_ts = now
         if IS_LINUX:
             try:
                 if self._linux_overrideredirect:
@@ -1266,20 +1353,7 @@ class VoxCraftApp(ctk.CTk):
                     self._apply_linux_window_chrome()
             except Exception:
                 pass
-        self._last_ui_hidden = True
-        self._last_in_norm = -1.0
-        self._last_out_norm = -1.0
-        self._last_gate_open = None
-        self._last_wave_idle = False
-        if self._active_tab_key == "tab_eq":
-            self._schedule_eq_redraw()
-        if self._ui_loop_job is not None:
-            try:
-                self.after_cancel(self._ui_loop_job)
-            except Exception:
-                pass
-            self._ui_loop_job = None
-        self.after(15, self._schedule_ui_loop)
+        self._flush_restore_paint()
 
     def _apply_window_icon(self):
         if sys.platform == "win32" and os.path.exists(ICON_ICO_PATH):
@@ -1401,16 +1475,30 @@ class VoxCraftApp(ctk.CTk):
     def _restore_from_tray(self):
         if self._is_quitting:
             return
+        used_alpha_mask = False
         try:
+            if sys.platform == "win32":
+                try:
+                    self.attributes("-alpha", 0.0)
+                    used_alpha_mask = True
+                except Exception:
+                    used_alpha_mask = False
             self.deiconify()
             self.state("normal")
             self.lift()
+            self._last_map_ts = time.monotonic()
+            self._flush_restore_paint()
             self.attributes("-topmost", True)
             self.after(70, lambda: self.winfo_exists() and self.attributes("-topmost", False))
             self.focus_force()
         except Exception:
             pass
-        self._on_window_map()
+        finally:
+            if used_alpha_mask:
+                try:
+                    self.attributes("-alpha", 1.0)
+                except Exception:
+                    pass
 
     def _minimize_to_tray(self):
         self.withdraw()
@@ -1760,6 +1848,7 @@ class VoxCraftApp(ctk.CTk):
                 hover_color=th["warn"],
                 border_color=th["warn"],
                 text_color="#111827",
+                bg_color="transparent",
             )
         else:
             btn.configure(
@@ -1767,6 +1856,7 @@ class VoxCraftApp(ctk.CTk):
                 hover_color=th["control_hover"],
                 border_color=th["control_border"],
                 text_color=th["text_primary"],
+                bg_color="transparent",
             )
 
     def _toggle_bypass_btn(self):
@@ -1786,6 +1876,7 @@ class VoxCraftApp(ctk.CTk):
                 fg_color=th["danger"],
                 hover_color=th["danger_hover"],
                 text_color="#ffffff",
+                bg_color="transparent",
             )
         else:
             btn.configure(
@@ -1793,6 +1884,7 @@ class VoxCraftApp(ctk.CTk):
                 fg_color=th["accent"],
                 hover_color=th["accent_hover"],
                 text_color=th["accent_text"],
+                bg_color="transparent",
             )
 
     def _build_layout(self):
@@ -1818,13 +1910,15 @@ class VoxCraftApp(ctk.CTk):
         topbar.pack(fill="x", padx=14, pady=(10 if IS_LINUX else 12, 8))
         topbar.pack_propagate(False)
 
-        title_box = ctk.CTkFrame(topbar, fg_color="transparent")
+        title_box = self._box(topbar, bg_role="panel_bg")
         title_box.pack(side="left", padx=(16, 14))
         pil_ico = _load_or_create_pil_icon()
         if pil_ico is not None:
             try:
                 self._topbar_logo_img = ctk.CTkImage(light_image=pil_ico, dark_image=pil_ico, size=(24, 24))
-                ctk.CTkLabel(title_box, image=self._topbar_logo_img, text="").pack(side="left", padx=(0, 9))
+                logo_lbl = ctk.CTkLabel(title_box, image=self._topbar_logo_img, text="")
+                logo_lbl.pack(side="left", padx=(0, 9))
+                self._reg_theme(logo_lbl, lambda _t, wd=logo_lbl: wd.configure(bg_color="transparent"))
             except Exception:
                 pass
         self._lbl(title_box, "VoxCraft Studio", font_key="brand", color_role="accent", is_key=False).pack(side="left")
@@ -1834,7 +1928,7 @@ class VoxCraftApp(ctk.CTk):
         ).pack(side="left", padx=(7, 0), pady=(3, 0))
 
         # Controles de Preset no Topo (.wb-preset-wrap)
-        preset_box = ctk.CTkFrame(topbar, fg_color="transparent")
+        preset_box = self._box(topbar, bg_role="panel_bg")
         preset_box.pack(side="left", padx=6)
         self._lbl(preset_box, "preset", font_key="sm_m", color_role="text_muted").pack(side="left", padx=(0, 8))
 
@@ -1870,7 +1964,7 @@ class VoxCraftApp(ctk.CTk):
         ).pack(side="left", padx=3)
 
         # Botões da Direita (.wb-actions)
-        right_top = ctk.CTkFrame(topbar, fg_color="transparent")
+        right_top = self._box(topbar, bg_role="panel_bg")
         right_top.pack(side="right", padx=14)
 
         self.settings_btn = self._btn(
@@ -2003,7 +2097,7 @@ class VoxCraftApp(ctk.CTk):
         )
         self.mon_dev_menu.pack(padx=12, pady=(4, 8))
 
-        lat_row = ctk.CTkFrame(route_card, fg_color="transparent")
+        lat_row = self._box(route_card, bg_role="card_bg")
         lat_row.pack(fill="x", padx=12, pady=(2, 8))
         self._lbl(lat_row, "latency", font_key="xs_m", color_role="text_muted").pack(side="left")
         self.latency_var = ctk.StringVar(value=self._t("lat_low"))
@@ -2047,7 +2141,8 @@ class VoxCraftApp(ctk.CTk):
         self._reg_theme(
             self.status_lbl,
             lambda t: self.status_lbl.configure(
-                text_color=t["live"] if self.router.running else t.get(self._status_role, t["text_muted"])
+                text_color=t["live"] if self.router.running else t.get(self._status_role, t["text_muted"]),
+                bg_color="transparent",
             ),
         )
 
@@ -2064,7 +2159,7 @@ class VoxCraftApp(ctk.CTk):
             anchor="w", padx=12, pady=(0, 6)
         )
 
-        hk_row = ctk.CTkFrame(hk_card, fg_color="transparent")
+        hk_row = self._box(hk_card, bg_role="card_bg")
         hk_row.pack(fill="x", padx=12, pady=(0, 6))
         self._lbl(hk_row, "key_label", font_key="xs_m", color_role="text_muted").pack(side="left")
         self.hotkey_btn = self._btn(
@@ -2101,21 +2196,27 @@ class VoxCraftApp(ctk.CTk):
             anchor="w", padx=12, pady=(12, 6)
         )
 
-        row_in = ctk.CTkFrame(meter_card, fg_color="transparent")
+        row_in = self._box(meter_card, bg_role="card_bg")
         row_in.pack(fill="x", padx=12)
         self._lbl(row_in, "input_lbl", font_key="xs_m", color_role="text_muted", width=55, anchor="w").pack(side="left")
         self.in_bar = ctk.CTkProgressBar(row_in, height=6, fg_color=th["track_bg"], progress_color=th["accent"])
         self.in_bar.set(0)
         self.in_bar.pack(side="left", fill="x", expand=True, padx=6)
-        self._reg_theme(self.in_bar, lambda t: self.in_bar.configure(fg_color=t["track_bg"], progress_color=t["accent"]))
+        self._reg_theme(
+            self.in_bar,
+            lambda t: self.in_bar.configure(fg_color=t["track_bg"], progress_color=t["accent"], bg_color="transparent"),
+        )
 
-        row_out = ctk.CTkFrame(meter_card, fg_color="transparent")
+        row_out = self._box(meter_card, bg_role="card_bg")
         row_out.pack(fill="x", padx=12, pady=(6, 4))
         self._lbl(row_out, "output_lbl", font_key="xs_m", color_role="text_muted", width=55, anchor="w").pack(side="left")
         self.out_bar = ctk.CTkProgressBar(row_out, height=6, fg_color=th["track_bg"], progress_color=th["live"])
         self.out_bar.set(0)
         self.out_bar.pack(side="left", fill="x", expand=True, padx=6)
-        self._reg_theme(self.out_bar, lambda t: self.out_bar.configure(fg_color=t["track_bg"], progress_color=t["live"]))
+        self._reg_theme(
+            self.out_bar,
+            lambda t: self.out_bar.configure(fg_color=t["track_bg"], progress_color=t["live"], bg_color="transparent"),
+        )
 
         self.gate_led = ctk.CTkLabel(
             meter_card, text=self._t("gate_open"), font=self._fonts["mono_xs_b"], text_color=th["live"]
@@ -2126,7 +2227,9 @@ class VoxCraftApp(ctk.CTk):
         )
         self._reg_theme(
             self.gate_led,
-            lambda t: self.gate_led.configure(text_color=t["live"] if self._last_gate_open is not False else t["warn"]),
+            lambda t: self.gate_led.configure(
+                text_color=t["live"] if self._last_gate_open is not False else t["warn"], bg_color="transparent"
+            ),
         )
 
         self.wave_canvas = tk.Canvas(
@@ -2228,8 +2331,8 @@ class VoxCraftApp(ctk.CTk):
         if tab_key == "tab_eq":
             self._schedule_eq_redraw()
 
-    def _slider_grid(self, parent, cols: int = 2) -> ctk.CTkFrame:
-        grid = ctk.CTkFrame(parent, fg_color="transparent")
+    def _slider_grid(self, parent, cols: int = 2, bg_role: str = "card_bg") -> tk.Frame:
+        grid = self._box(parent, bg_role=bg_role)
         grid.pack(fill="x", padx=10, pady=(2, 8))
         for c in range(cols):
             grid.columnconfigure(c, weight=1, uniform="sgrid")
@@ -2243,7 +2346,7 @@ class VoxCraftApp(ctk.CTk):
         card1 = self._card(scroll, role="card", corner_radius=12)
         card1.pack(fill="x", padx=10, pady=8)
 
-        hdr1 = ctk.CTkFrame(card1, fg_color="transparent")
+        hdr1 = self._box(card1, bg_role="card_bg")
         hdr1.pack(fill="x", padx=16, pady=(14, 6))
         self.pitch_en_var = ctk.BooleanVar(value=False)
         self._switch(hdr1, "pitch_shift", self.pitch_en_var, self._on_param_change, font_key="h3_b").pack(side="left")
@@ -2253,7 +2356,7 @@ class VoxCraftApp(ctk.CTk):
         self.pitch_cents_var = self._add_slider(g1, "fine_tune", -100.0, 100.0, 0.0, "ct", step=1.0, grid_pos=(0, 1), boxed=True)
         self.pitch_mix_var = self._add_slider(g1, "mix", 0.0, 100.0, 100.0, "%", step=1.0, grid_pos=(1, 0), boxed=True)
 
-        qrow = ctk.CTkFrame(card1, fg_color="transparent")
+        qrow = self._box(card1, bg_role="card_bg")
         qrow.pack(fill="x", padx=15, pady=(2, 14))
         for label, st_val in [
             ("-12 st", -12.0),
@@ -2280,7 +2383,7 @@ class VoxCraftApp(ctk.CTk):
         card2 = self._card(scroll, role="card", corner_radius=12)
         card2.pack(fill="x", padx=10, pady=8)
 
-        hdr2 = ctk.CTkFrame(card2, fg_color="transparent")
+        hdr2 = self._box(card2, bg_role="card_bg")
         hdr2.pack(fill="x", padx=16, pady=(14, 6))
         self.fshift_en_var = ctk.BooleanVar(value=False)
         self._switch(hdr2, "freq_shift", self.fshift_en_var, self._on_param_change, font_key="h3_b").pack(side="left")
@@ -2289,7 +2392,7 @@ class VoxCraftApp(ctk.CTk):
         self.fshift_hz_var = self._add_slider(g2, "shift_hz", -500.0, 500.0, 0.0, "Hz", step=1.0, grid_pos=(0, 0), boxed=True)
         self.fshift_mix_var = self._add_slider(g2, "mix", 0.0, 100.0, 100.0, "%", step=1.0, grid_pos=(0, 1), boxed=True)
 
-        qrow2 = ctk.CTkFrame(card2, fg_color="transparent")
+        qrow2 = self._box(card2, bg_role="card_bg")
         qrow2.pack(fill="x", padx=15, pady=(2, 14))
         for label, hz_val in [("-120 Hz", -120.0), ("-30 Hz", -30.0), ("0 Hz", 0.0), ("+50 Hz", 50.0), ("+180 Hz", 180.0)]:
             self._btn(
@@ -2308,12 +2411,12 @@ class VoxCraftApp(ctk.CTk):
         card3 = self._card(scroll, role="card", corner_radius=12)
         card3.pack(fill="x", padx=10, pady=8)
 
-        hdr3 = ctk.CTkFrame(card3, fg_color="transparent")
+        hdr3 = self._box(card3, bg_role="card_bg")
         hdr3.pack(fill="x", padx=16, pady=(14, 6))
         self.voc_en_var = ctk.BooleanVar(value=False)
         self._switch(hdr3, "vocoder", self.voc_en_var, self._on_param_change, font_key="h3_b").pack(side="left")
 
-        voc_row = ctk.CTkFrame(card3, fg_color="transparent")
+        voc_row = self._box(card3, bg_role="card_bg")
         voc_row.pack(fill="x", padx=16, pady=(2, 6))
         self._lbl(voc_row, "carrier", font_key="sm_m", color_role="text_muted").pack(side="left", padx=(0, 12))
         self.voc_carrier_var = ctk.StringVar(value=self._t("wave_saw"))
@@ -2337,12 +2440,12 @@ class VoxCraftApp(ctk.CTk):
         top = self._card(tab, role="card", corner_radius=12)
         top.pack(fill="x", padx=10, pady=8)
 
-        hdr = ctk.CTkFrame(top, fg_color="transparent")
+        hdr = self._box(top, bg_role="card_bg")
         hdr.pack(fill="x", padx=16, pady=(12, 8))
         self.eq_en_var = ctk.BooleanVar(value=True)
         self._switch(hdr, "equalizer", self.eq_en_var, self._on_param_change, font_key="h3_b").pack(side="left")
 
-        right_hdr = ctk.CTkFrame(hdr, fg_color="transparent")
+        right_hdr = self._box(hdr, bg_role="card_bg")
         right_hdr.pack(side="right")
         self.eq_hpf_badge = self._lbl(
             right_hdr, "HPF 80 Hz", font_key="mono_sm_b", color_role="accent", is_key=False
@@ -2371,7 +2474,7 @@ class VoxCraftApp(ctk.CTk):
         bot = self._card(tab, role="card", corner_radius=12)
         bot.pack(fill="both", expand=True, padx=10, pady=(0, 8))
 
-        cuts = ctk.CTkFrame(bot, fg_color="transparent")
+        cuts = self._box(bot, bg_role="card_bg")
         cuts.pack(fill="x", padx=14, pady=(12, 6))
 
         hpf_box = self._card(cuts, role="subcard", bordered=True, corner_radius=10)
@@ -2386,7 +2489,7 @@ class VoxCraftApp(ctk.CTk):
         self._switch(lpf_box, "lpf", self.lpf_en_var, self._on_param_change).pack(anchor="w", padx=12, pady=(10, 0))
         self.lpf_hz_var = self._add_slider(lpf_box, "frequency", 1200.0, 18000.0, 12000.0, "Hz", step=100.0)
 
-        bands_frame = ctk.CTkFrame(bot, fg_color="transparent")
+        bands_frame = self._box(bot, bg_role="card_bg")
         bands_frame.pack(fill="both", expand=True, padx=14, pady=8)
 
         self.eq_b1_var = self._add_vertical_eq_band(bands_frame, "eq_b1")
@@ -2443,7 +2546,7 @@ class VoxCraftApp(ctk.CTk):
         self._switch(
             c4, "Tremolo", self.trem_en_var, self._on_param_change, font_key="h3_b", is_key=False
         ).pack(anchor="w", padx=16, pady=(14, 6))
-        trem_row = ctk.CTkFrame(c4, fg_color="transparent")
+        trem_row = self._box(c4, bg_role="card_bg")
         trem_row.pack(fill="x", padx=16, pady=(2, 6))
         self._lbl(trem_row, "waveform", font_key="sm_m", color_role="text_muted").pack(side="left", padx=(0, 12))
         self.trem_wave_var = ctk.StringVar(value=self._t("wave_sine"))
@@ -2471,7 +2574,7 @@ class VoxCraftApp(ctk.CTk):
             anchor="w", padx=16, pady=(14, 6)
         )
 
-        wave_row = ctk.CTkFrame(c1, fg_color="transparent")
+        wave_row = self._box(c1, bg_role="card_bg")
         wave_row.pack(fill="x", padx=16, pady=(2, 6))
         self._lbl(wave_row, "waveform", font_key="sm_m", color_role="text_muted").pack(side="left", padx=(0, 12))
         self.ring_wave_var = ctk.StringVar(value=self._t("wave_sine"))
@@ -2554,14 +2657,14 @@ class VoxCraftApp(ctk.CTk):
             ("reverb", True, self.rev_en_var),
         ]
 
-        grid = ctk.CTkFrame(box, fg_color="transparent")
+        grid = self._box(box, bg_role="panel_bg")
         grid.pack(fill="x", padx=8, pady=4)
         grid.columnconfigure(0, weight=1, uniform="mgrid")
         grid.columnconfigure(1, weight=1, uniform="mgrid")
         for idx, (label_key, is_k, var) in enumerate(modules):
             card = self._card(grid, role="card", corner_radius=10)
             card.grid(row=idx // 2, column=idx % 2, sticky="ew", padx=6, pady=6)
-            row = ctk.CTkFrame(card, fg_color="transparent")
+            row = self._box(card, bg_role="card_bg")
             row.pack(fill="x", padx=14, pady=12)
             self._lbl(row, f"{idx + 1:02d}", font_key="mono_sm_b", color_role="accent", is_key=False).pack(
                 side="left", padx=(0, 10)
@@ -2602,7 +2705,7 @@ class VoxCraftApp(ctk.CTk):
             top_pad_y = (10, 4)
             slider_pad_y = (2, 10)
         else:
-            frame = ctk.CTkFrame(parent, fg_color="transparent")
+            frame = self._box(parent, bg_role="subcard_bg")
             inner_pad_x = 0
             top_pad_y = (0, 2)
             slider_pad_y = (2, 4)
@@ -2612,12 +2715,12 @@ class VoxCraftApp(ctk.CTk):
         else:
             frame.pack(fill="x", padx=12 if boxed else 14, pady=4)
 
-        top = ctk.CTkFrame(frame, fg_color="transparent")
-        top.pack(fill="x", padx=inner_pad_x, pady=top_pad_y)
-        self._lbl(top, label_key, font_key="sm_m", color_role="text_body").pack(side="left")
+        frame.columnconfigure(0, weight=1)
+        lbl_w = self._lbl(frame, label_key, font_key="sm_m", color_role="text_body")
+        lbl_w.grid(row=0, column=0, sticky="w", padx=(inner_pad_x, 6), pady=top_pad_y)
         init_txt = f"{int(round(default))} {unit}" if (unit in ("Hz", "ms", "%", "bits", "x", "ct") and step >= 1.0) else f"{default:.1f} {unit}"
-        val_lbl = self._lbl(top, init_txt, font_key="mono_sm_b", color_role="accent", is_key=False)
-        val_lbl.pack(side="right")
+        val_lbl = self._lbl(frame, init_txt, font_key="mono_sm_b", color_role="accent", is_key=False)
+        val_lbl.grid(row=0, column=1, sticky="e", padx=(6, inner_pad_x), pady=top_pad_y)
 
         var = ctk.DoubleVar(value=default)
         steps = max(1, int(round((vmax - vmin) / step)))
@@ -2642,7 +2745,7 @@ class VoxCraftApp(ctk.CTk):
             variable=var,
             command=on_slide,
         )
-        slider.pack(fill="x", padx=inner_pad_x, pady=slider_pad_y)
+        slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=inner_pad_x, pady=slider_pad_y)
         self._reg_theme(
             slider,
             lambda t, s=slider: s.configure(
@@ -2650,6 +2753,7 @@ class VoxCraftApp(ctk.CTk):
                 progress_color=t["accent_deep"],
                 button_color=t["accent"],
                 button_hover_color=t["accent_hover"],
+                bg_color="transparent",
             ),
         )
         var._val_lbl = val_lbl
@@ -3414,6 +3518,62 @@ class VoxCraftApp(ctk.CTk):
         if len(pts) >= 4:
             c.create_line(*pts, fill=th["accent"], width=2.5, smooth=True)
 
+    def _refresh_live_meters_and_wave(self, force_refresh: bool = False) -> int:
+        next_ms = 110
+        th = self._c()
+
+        # Atualiza VU meters apenas se houve variação visível
+        in_norm = max(0.0, min(1.0, (self.dsp.input_peak_db + 60.0) / 60.0))
+        out_norm = max(0.0, min(1.0, (self.dsp.output_peak_db + 60.0) / 60.0))
+        if force_refresh or abs(in_norm - self._last_in_norm) >= 0.005:
+            self._last_in_norm = in_norm
+            self.in_bar.set(in_norm)
+        if force_refresh or abs(out_norm - self._last_out_norm) >= 0.005:
+            self._last_out_norm = out_norm
+            self.out_bar.set(out_norm)
+
+        gate_open = bool(self.dsp.gate_is_open)
+        if force_refresh or gate_open != self._last_gate_open:
+            self._last_gate_open = gate_open
+            if gate_open:
+                self.gate_led.configure(text=self._t("gate_open"), text_color=th["live"])
+            else:
+                self.gate_led.configure(text=self._t("gate_closed"), text_color=th["warn"])
+
+        # Osciloscópio sem delete("all"): reutiliza os mesmos itens do Canvas (zero GDI/Tk churn)
+        wc = self.wave_canvas
+        ww = max(200, wc.winfo_width())
+        wh = max(50, wc.winfo_height())
+        mid = wh / 2.0
+        if self._wave_mid_id is None:
+            self._wave_mid_id = wc.create_line(0, mid, ww, mid, fill=th["control_bg"])
+        else:
+            wc.coords(self._wave_mid_id, 0, mid, ww, mid)
+            wc.itemconfigure(self._wave_mid_id, fill=th["control_bg"])
+
+        wave = self.dsp.last_waveform
+        if self.router.running and len(wave) > 1:
+            self._last_wave_idle = False
+            n_w = len(wave)
+            if self._wave_xs is None or self._wave_cached_w != ww or self._wave_cached_len != n_w:
+                self._wave_xs = np.linspace(0.0, float(ww), n_w)
+                self._wave_cached_w = ww
+                self._wave_cached_len = n_w
+            ys = mid - np.clip(wave, -1.0, 1.0) * (mid - 4.0)
+            pts = np.column_stack((self._wave_xs, ys)).ravel().tolist()
+            color = th["warn"] if self.params.bypass else th["accent"]
+            if self._wave_line_id is None:
+                self._wave_line_id = wc.create_line(*pts, fill=color, width=2)
+            else:
+                wc.coords(self._wave_line_id, *pts)
+                wc.itemconfigure(self._wave_line_id, fill=color, state="normal")
+            next_ms = 33
+        elif force_refresh or not self._last_wave_idle:
+            self._last_wave_idle = True
+            if self._wave_line_id is not None:
+                wc.itemconfigure(self._wave_line_id, state="hidden")
+        return next_ms
+
     def _schedule_ui_loop(self):
         self._ui_loop_job = None
         if self._is_quitting or self._rebuilding_ui:
@@ -3428,62 +3588,10 @@ class VoxCraftApp(ctk.CTk):
             self._ui_loop_job = self.after(220, self._schedule_ui_loop)
             return
 
-        next_ms = 110
         try:
-            th = self._c()
             force_refresh = self._last_ui_hidden
             self._last_ui_hidden = False
-
-            # Atualiza VU meters apenas se houve variação visível
-            in_norm = max(0.0, min(1.0, (self.dsp.input_peak_db + 60.0) / 60.0))
-            out_norm = max(0.0, min(1.0, (self.dsp.output_peak_db + 60.0) / 60.0))
-            if force_refresh or abs(in_norm - self._last_in_norm) >= 0.005:
-                self._last_in_norm = in_norm
-                self.in_bar.set(in_norm)
-            if force_refresh or abs(out_norm - self._last_out_norm) >= 0.005:
-                self._last_out_norm = out_norm
-                self.out_bar.set(out_norm)
-
-            gate_open = bool(self.dsp.gate_is_open)
-            if force_refresh or gate_open != self._last_gate_open:
-                self._last_gate_open = gate_open
-                if gate_open:
-                    self.gate_led.configure(text=self._t("gate_open"), text_color=th["live"])
-                else:
-                    self.gate_led.configure(text=self._t("gate_closed"), text_color=th["warn"])
-
-            # Osciloscópio sem delete("all"): reutiliza os mesmos itens do Canvas (zero GDI/Tk churn)
-            wc = self.wave_canvas
-            ww = max(200, wc.winfo_width())
-            wh = max(50, wc.winfo_height())
-            mid = wh / 2.0
-            if self._wave_mid_id is None:
-                self._wave_mid_id = wc.create_line(0, mid, ww, mid, fill=th["control_bg"])
-            else:
-                wc.coords(self._wave_mid_id, 0, mid, ww, mid)
-                wc.itemconfigure(self._wave_mid_id, fill=th["control_bg"])
-
-            wave = self.dsp.last_waveform
-            if self.router.running and len(wave) > 1:
-                self._last_wave_idle = False
-                n_w = len(wave)
-                if self._wave_xs is None or self._wave_cached_w != ww or self._wave_cached_len != n_w:
-                    self._wave_xs = np.linspace(0.0, float(ww), n_w)
-                    self._wave_cached_w = ww
-                    self._wave_cached_len = n_w
-                ys = mid - np.clip(wave, -1.0, 1.0) * (mid - 4.0)
-                pts = np.column_stack((self._wave_xs, ys)).ravel().tolist()
-                color = th["warn"] if self.params.bypass else th["accent"]
-                if self._wave_line_id is None:
-                    self._wave_line_id = wc.create_line(*pts, fill=color, width=2)
-                else:
-                    wc.coords(self._wave_line_id, *pts)
-                    wc.itemconfigure(self._wave_line_id, fill=color, state="normal")
-                next_ms = 33
-            elif force_refresh or not self._last_wave_idle:
-                self._last_wave_idle = True
-                if self._wave_line_id is not None:
-                    wc.itemconfigure(self._wave_line_id, state="hidden")
+            next_ms = self._refresh_live_meters_and_wave(force_refresh=force_refresh)
         except Exception:
             next_ms = 120
 
@@ -3645,191 +3753,81 @@ class VoxCraftApp(ctk.CTk):
         return count
 
     def _start_app_update(self):
+        if getattr(self, "_updating_app", False) or self._is_quitting:
+            return
+        self._updating_app = True
         # Salva imediatamente entradas, saídas, preset, atalho e parâmetros atuais
         self._save_config(include_params=True)
-
-        existing = getattr(self, "_update_win", None)
-        if existing is not None:
-            try:
-                if existing.winfo_exists():
-                    existing.deiconify()
-                    existing.lift()
-                    existing.focus_force()
-                    return
-            except Exception:
-                pass
-
-        th = self._c()
-
-        win = ctk.CTkToplevel(self)
-        self._update_win = win
-        win.title(self._t("upd_win_title"))
-        w, h = 580, 240
-        self.update_idletasks()
-        px = self.winfo_rootx() + max(0, (self.winfo_width() - w) // 2)
-        py = self.winfo_rooty() + max(0, (self.winfo_height() - h) // 2)
-        win.geometry(f"{w}x{h}+{px}+{py}")
-        win.resizable(False, False)
-        win.transient(self)
-        win.configure(fg_color=th["modal_bg"])
-
-        is_busy = False
-
-        def _close_update():
-            if is_busy:
-                return
-            self._update_win = None
-            try:
-                win.destroy()
-            except Exception:
-                pass
-
-        win.protocol("WM_DELETE_WINDOW", _close_update)
-
-        local_id = self._get_local_build_identity()
-
-        hdr_row = ctk.CTkFrame(win, fg_color="transparent")
-        hdr_row.pack(fill="x", padx=20, pady=(18, 6))
-        ctk.CTkLabel(
-            hdr_row, text=self._t("upd_header"), font=self._fonts["h2_b"], text_color=th["accent"]
-        ).pack(side="left")
-        ctk.CTkLabel(
-            hdr_row, text=f"v{local_id['version']}", font=self._fonts["mono_xs_b"], text_color=th["text_subtle"]
-        ).pack(side="right")
-
-        msg_lbl = ctk.CTkLabel(
-            win,
-            text=self._t("upd_checking"),
-            justify="left",
-            wraplength=540,
-            font=self._fonts["sm"],
-            text_color=th["text_body"],
-        )
-        msg_lbl.pack(anchor="w", padx=20, pady=(8, 12))
-
-        progress = ctk.CTkProgressBar(win, mode="indeterminate", width=540, fg_color=th["track_bg"], progress_color=th["accent"])
-        progress.pack(padx=20, pady=(2, 16))
-        progress.start()
-
-        btn_row = ctk.CTkFrame(win, fg_color="transparent")
-        btn_row.pack(fill="x", padx=20, pady=(4, 16))
-
-        action_btn = ctk.CTkButton(
-            btn_row,
-            text=self._t("upd_now_btn"),
-            width=172,
-            height=34,
-            corner_radius=9,
-            font=self._fonts["sm_b"],
-            fg_color=th["live"],
-            hover_color=th["live_hover"],
-            text_color="#ffffff",
-            state="disabled",
-        )
-        action_btn.pack(side="left")
-
-        local_btn = ctk.CTkButton(
-            btn_row,
-            text=self._t("upd_local_btn"),
-            width=148,
-            height=34,
-            corner_radius=9,
-            font=self._fonts["sm_b"],
-            fg_color=th["control_bg"],
-            hover_color=th["accent_deep"],
-            text_color=th["text_primary"],
-            border_width=1,
-            border_color=th["control_border"],
-        )
-        local_btn.pack(side="left", padx=(8, 0))
-
-        recheck_btn = ctk.CTkButton(
-            btn_row,
-            text=self._t("upd_check_btn"),
-            width=92,
-            height=34,
-            corner_radius=9,
-            font=self._fonts["sm_b"],
-            fg_color=th["control_bg"],
-            hover_color=th["accent_deep"],
-            text_color=th["text_primary"],
-            border_width=1,
-            border_color=th["control_border"],
-        )
-        recheck_btn.pack(side="left", padx=(8, 0))
-
-        close_btn = ctk.CTkButton(
-            btn_row,
-            text=self._t("close"),
-            width=90,
-            height=34,
-            corner_radius=9,
-            font=self._fonts["sm_b"],
-            fg_color=th["control_bg"],
-            hover_color=th["control_hover"],
-            text_color=th["text_primary"],
-            border_width=1,
-            border_color=th["control_border"],
-            command=_close_update,
-        )
-        close_btn.pack(side="right")
-
-        win.update_idletasks()
-        win.lift()
-        win.focus_force()
 
         def safe_ui(fn):
             def _run_on_main():
                 try:
-                    if win.winfo_exists():
+                    if not self._is_quitting and self.winfo_exists():
                         fn()
                 except Exception:
                     pass
+
             try:
                 self.after(0, _run_on_main)
             except Exception:
                 pass
 
-        def _set_busy(text: str):
-            nonlocal is_busy
-            is_busy = True
-            safe_ui(lambda: (
-                action_btn.configure(state="disabled"),
-                local_btn.configure(state="disabled"),
-                recheck_btn.configure(state="disabled"),
-                close_btn.configure(state="disabled"),
-                progress.configure(mode="indeterminate"),
-                progress.start(),
-                msg_lbl.configure(text=text, text_color=self._c()["accent"]),
-            ))
+        def _set_btn_state(text_key: str, enabled: bool):
+            btn = getattr(self, "update_btn", None)
+            if btn is None:
+                return
+            try:
+                if btn.winfo_exists():
+                    btn.configure(
+                        text=self._t(text_key),
+                        state="normal" if enabled else "disabled",
+                        width=88 if enabled else 112,
+                    )
+            except Exception:
+                pass
 
-        def finish_message(text: str, color: str | None = None, enable_action: bool = False, btn_text: str | None = None, cmd=None):
-            nonlocal is_busy
-            is_busy = False
-            t_cur = self._c()
-            role_map = {"#10b981": t_cur["live"], "#f59e0b": t_cur["warn"], "#ef4444": t_cur["danger"]}
-            use_color = role_map.get(color, color) if color else t_cur["text_primary"]
-            use_btn_text = btn_text or self._t("upd_now_btn")
+        _set_btn_state("upd_btn_checking", enabled=False)
+        if not self.router.running:
+            self._set_status(self._t("upd_consulting"), "accent")
 
+        def finish_up_to_date(ver_str: str):
             def _ui():
-                progress.stop()
-                progress.configure(mode="determinate")
-                progress.set(1.0)
-                msg_lbl.configure(text=text, text_color=use_color)
-                if enable_action and cmd is not None:
-                    action_btn.configure(state="normal", text=use_btn_text, command=cmd)
-                else:
-                    action_btn.configure(state="disabled")
-                close_btn.configure(state="normal")
-                local_btn.configure(state="normal")
-                recheck_btn.configure(state="normal")
+                self._updating_app = False
+                _set_btn_state("update", enabled=True)
+                if not self.router.running:
+                    self._set_status(self._t("upd_up_to_date_ver", ver=ver_str), "live")
+                messagebox.showinfo(
+                    self._t("upd_win_title"),
+                    self._t("upd_latest_msg", ver=ver_str),
+                    parent=self,
+                )
+
+            safe_ui(_ui)
+
+        def finish_error(msg: str, warn: bool = False):
+            def _ui():
+                self._updating_app = False
+                _set_btn_state("update", enabled=True)
+                if not self.router.running:
+                    self._set_status(self._t("stopped"), "text_muted")
+                dlg = messagebox.showwarning if warn else messagebox.showerror
+                dlg(self._t("upd_win_title"), msg, parent=self)
+
+            safe_ui(_ui)
+
+        def set_installing_ui(status_msg: str):
+            def _ui():
+                _set_btn_state("upd_btn_installing", enabled=False)
+                if not self.router.running:
+                    self._set_status(status_msg, "accent")
+
             safe_ui(_ui)
 
         def install_deps_and_relaunch():
             if not IS_FROZEN:
-                safe_ui(lambda: msg_lbl.configure(text=self._t("upd_installing_deps")))
+                set_installing_ui(self._t("upd_installing_deps"))
                 self._run_cmd([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"], BASE_DIR)
-            safe_ui(lambda: self._relaunch_after_update(win))
+            safe_ui(lambda: self._relaunch_after_update())
 
         def _launch_exe_installer(exe_path: str, release_meta: dict | None = None):
             self.app_config["pending_update_restore"] = True
@@ -3842,10 +3840,6 @@ class VoxCraftApp(ctk.CTk):
             self._save_config(include_params=True)
             if _SINGLE_INSTANCE is not None:
                 _SINGLE_INSTANCE.release()
-            try:
-                win.destroy()
-            except Exception:
-                pass
             try:
                 exe_name = os.path.basename(exe_path).lower()
                 if IS_FROZEN and sys.platform == "win32":
@@ -3876,85 +3870,31 @@ class VoxCraftApp(ctk.CTk):
                 else:
                     subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path) or tempfile.gettempdir())
             except Exception as err:
+                self._updating_app = False
+                _set_btn_state("update", enabled=True)
                 messagebox.showerror(
                     self._t("upd_err_open_title"),
                     self._t("upd_err_open_body", path=exe_path, err=err),
+                    parent=self,
                 )
+                return
             self._quit_app()
 
-        def apply_local_file():
-            filetypes = (
-                [(self._t("upd_ft_exe_zip"), "*.exe *.zip"), (self._t("upd_ft_exe"), "*.exe"), (self._t("upd_ft_zip"), "*.zip")]
-                if IS_FROZEN
-                else [(self._t("upd_ft_zip_exe"), "*.zip *.exe"), (self._t("upd_ft_zip"), "*.zip"), (self._t("upd_ft_exe"), "*.exe")]
-            )
-            picked = filedialog.askopenfilename(
-                parent=win,
-                title=self._t("upd_pick_title"),
-                filetypes=filetypes,
-            )
-            if not picked:
-                return
-
-            def _worker():
-                _set_busy(self._t("upd_preparing"))
-                try:
-                    if picked.lower().endswith(".exe"):
-                        safe_ui(lambda: _launch_exe_installer(picked))
-                        return
-
-                    if IS_FROZEN:
-                        with zipfile.ZipFile(picked) as zf:
-                            exe_members = [
-                                m for m in zf.infolist()
-                                if not m.is_dir() and m.filename.lower().endswith(".exe")
-                            ]
-                            if not exe_members:
-                                finish_message(self._t("upd_no_exe_in_zip"), "#f59e0b")
-                                return
-                            chosen_m = next(
-                                (m for m in exe_members if "setup" in os.path.basename(m.filename).lower()),
-                                exe_members[0],
-                            )
-                            out_exe = os.path.join(tempfile.gettempdir(), os.path.basename(chosen_m.filename))
-                            with zf.open(chosen_m) as src, open(out_exe, "wb") as dst:
-                                shutil.copyfileobj(src, dst)
-                        safe_ui(lambda: _launch_exe_installer(out_exe))
-                        return
-
-                    n_files = self._extract_zip_preserving_config(picked)
-                    if n_files == 0:
-                        finish_message(self._t("upd_no_valid_zip"), "#ef4444")
-                        return
-                    install_deps_and_relaunch()
-                except Exception as e:
-                    finish_message(self._t("upd_err_process", err=e), "#ef4444")
-
-            threading.Thread(target=_worker, daemon=True).start()
-
-        local_btn.configure(command=apply_local_file)
-
-        def _run_git_update(target_ref: str, force_reset: bool = False):
-            _set_busy(self._t("upd_git_applying"))
-            if force_reset:
-                rc, out = self._run_cmd(["git", "reset", "--hard", target_ref], BASE_DIR)
-            else:
-                rc, out = self._run_cmd(["git", "pull", "--ff-only"], BASE_DIR)
-                if rc != 0:
-                    remote_branch = target_ref.split("/", 1)[-1] if "/" in target_ref else "main"
-                    rc, out = self._run_cmd(["git", "pull", "--autostash", "origin", remote_branch], BASE_DIR)
-                if rc != 0:
-                    rc, out = self._run_cmd(["git", "reset", "--hard", target_ref], BASE_DIR)
+        def _run_git_update(target_ref: str):
+            set_installing_ui(self._t("upd_git_applying"))
+            rc, out = self._run_cmd(["git", "pull", "--ff-only"], BASE_DIR)
             if rc != 0:
-                finish_message(self._t("upd_git_fail", out=out[:260]), "#ef4444")
+                remote_branch = target_ref.split("/", 1)[-1] if "/" in target_ref else "main"
+                rc, out = self._run_cmd(["git", "pull", "--autostash", "origin", remote_branch], BASE_DIR)
+            if rc != 0:
+                rc, out = self._run_cmd(["git", "reset", "--hard", target_ref], BASE_DIR)
+            if rc != 0:
+                finish_error(self._t("upd_git_fail", out=out[:260]))
                 return
             install_deps_and_relaunch()
 
-        def apply_git_update(target_ref: str, force_reset: bool = False):
-            threading.Thread(target=lambda: _run_git_update(target_ref, force_reset), daemon=True).start()
-
-        def _run_github_zip_update(repo_slug: str, tok: str = "", commit_sha: str = ""):
-            _set_busy(self._t("upd_downloading_gh", repo=repo_slug))
+        def _run_github_zip_update(repo_slug: str, tok: str = "", commit_sha: str = "", release_meta: dict | None = None):
+            set_installing_ui(self._t("upd_downloading_gh", repo=repo_slug))
             raw_zip = None
             last_err = ""
             for branch in ("main", "master"):
@@ -3969,15 +3909,20 @@ class VoxCraftApp(ctk.CTk):
                 except Exception as e:
                     last_err = str(e)
             if not raw_zip:
-                finish_message(self._t("upd_gh_fail", repo=repo_slug, err=last_err), "#ef4444")
+                finish_error(self._t("upd_gh_fail", repo=repo_slug, err=last_err))
                 return
             try:
                 self._extract_zip_preserving_config(io.BytesIO(raw_zip))
                 if commit_sha:
                     self.app_config["installed_commit_sha"] = commit_sha
-                    self._save_config()
+                if isinstance(release_meta, dict):
+                    if release_meta.get("tag"):
+                        self.app_config["installed_tag"] = str(release_meta["tag"])
+                    if release_meta.get("version"):
+                        self.app_config["installed_version"] = str(release_meta["version"])
+                self._save_config()
             except Exception as e:
-                finish_message(self._t("upd_extract_fail", err=e), "#ef4444")
+                finish_error(self._t("upd_extract_fail", err=e))
                 return
             install_deps_and_relaunch()
 
@@ -3988,7 +3933,7 @@ class VoxCraftApp(ctk.CTk):
             tok: str = "",
             release_meta: dict | None = None,
         ):
-            _set_busy(self._t("upd_downloading_rel", name=asset_name))
+            set_installing_ui(self._t("upd_downloading_rel", name=asset_name))
             try:
                 if tok and api_asset_url:
                     raw_exe, _ = self._download_bytes(
@@ -4003,237 +3948,218 @@ class VoxCraftApp(ctk.CTk):
                 with open(out_path, "wb") as f:
                     f.write(raw_exe)
             except Exception as e:
-                finish_message(self._t("upd_dl_exe_fail", err=e), "#ef4444")
+                finish_error(self._t("upd_dl_exe_fail", err=e))
                 return
 
             safe_ui(lambda p=out_path, m=release_meta: _launch_exe_installer(p, m))
 
-        def run_check():
+        def check_worker():
             repo_slug = self._detect_github_repo()
             token = str((self.app_config or {}).get("github_token", "")).strip()
+            api_accept = "application/vnd.github+json"
 
-            _set_busy(self._t("upd_consulting"))
+            try:
+                cur_local = self._get_local_build_identity()
+                local_ver = self._parse_version_tuple(cur_local["version"])
+                local_commit = cur_local["commit"]
 
-            def check_worker():
-                try:
-                    cur_local = self._get_local_build_identity()
-                    local_ver = self._parse_version_tuple(cur_local["version"])
-                    local_commit = cur_local["commit"]
+                if IS_FROZEN:
+                    rel = None
+                    last_err = None
+                    saw_empty_releases = False
 
-                    if IS_FROZEN:
-                        rel = None
-                        last_err = None
-                        saw_empty_releases = False
-                        api_accept = "application/vnd.github+json"
-
-                        for api_url in (
-                            f"https://api.github.com/repos/{repo_slug}/releases/latest",
-                            f"https://api.github.com/repos/{repo_slug}/releases?per_page=10",
-                            f"https://api.github.com/repos/{repo_slug}/releases/tags/latest",
-                        ):
-                            try:
-                                raw, _ = self._download_bytes(api_url, timeout=15, token=token, accept=api_accept)
-                                parsed = json.loads(raw.decode("utf-8"))
-                                if isinstance(parsed, list):
-                                    if len(parsed) == 0:
-                                        saw_empty_releases = True
-                                    non_draft = [r for r in parsed if not r.get("draft")]
-                                    rel = next(
-                                        (
-                                            r
-                                            for r in non_draft
-                                            if any(str(a.get("name", "")).lower().endswith(".exe") for a in (r.get("assets") or []))
-                                        ),
-                                        non_draft[0] if non_draft else None,
-                                    )
-                                elif isinstance(parsed, dict) and parsed.get("id"):
-                                    rel = parsed
-                                if rel:
-                                    break
-                            except Exception as e:
-                                last_err = e
-
-                        if rel is None and not token:
-                            direct_url = f"https://github.com/{repo_slug}/releases/latest/download/VoxCraftStudio_Setup.exe"
-                            try:
-                                _, final_url = self._download_bytes(direct_url, timeout=12, method="HEAD")
-                                m_tag = re.search(r"/releases/download/([^/]+)/", final_url)
-                                redir_tag = m_tag.group(1) if m_tag else "latest"
-                                redir_ver = self._parse_version_tuple(redir_tag)
-                                if redir_ver and local_ver and redir_ver > local_ver:
-                                    rel_meta = {
-                                        "tag": redir_tag,
-                                        "version": ".".join(str(x) for x in redir_ver),
-                                    }
-                                    _download_and_launch_exe(final_url, "VoxCraftStudio_Setup.exe", release_meta=rel_meta)
-                                    return
-                                msg_up = (
-                                    f"{self._t('upd_up_to_date_ver', ver=cur_local['version'])}\n"
-                                    f"{self._t('upd_no_newer_note', local_ver=cur_local['version'], remote_tag=redir_tag)}"
+                    for api_url in (
+                        f"https://api.github.com/repos/{repo_slug}/releases/latest",
+                        f"https://api.github.com/repos/{repo_slug}/releases?per_page=10",
+                        f"https://api.github.com/repos/{repo_slug}/releases/tags/latest",
+                    ):
+                        try:
+                            raw, _ = self._download_bytes(api_url, timeout=15, token=token, accept=api_accept)
+                            parsed = json.loads(raw.decode("utf-8"))
+                            if isinstance(parsed, list):
+                                if len(parsed) == 0:
+                                    saw_empty_releases = True
+                                non_draft = [r for r in parsed if not r.get("draft")]
+                                rel = next(
+                                    (
+                                        r
+                                        for r in non_draft
+                                        if any(str(a.get("name", "")).lower().endswith(".exe") for a in (r.get("assets") or []))
+                                    ),
+                                    non_draft[0] if non_draft else None,
                                 )
-                                finish_message(
-                                    msg_up,
-                                    "#10b981",
-                                    enable_action=True,
-                                    btn_text=self._t("upd_force_reinstall"),
-                                    cmd=lambda u=final_url: threading.Thread(
-                                        target=_download_and_launch_exe,
-                                        args=(u, "VoxCraftStudio_Setup.exe"),
-                                        daemon=True,
-                                    ).start(),
-                                )
-                                return
-                            except Exception:
-                                pass
+                            elif isinstance(parsed, dict) and parsed.get("id"):
+                                rel = parsed
+                            if rel:
+                                break
+                        except Exception as e:
+                            last_err = e
 
-                        if rel is None:
-                            if saw_empty_releases:
-                                finish_message(self._t("upd_no_releases", repo=repo_slug), "#f59e0b")
+                    if rel is None and not token:
+                        direct_url = f"https://github.com/{repo_slug}/releases/latest/download/VoxCraftStudio_Setup.exe"
+                        try:
+                            _, final_url = self._download_bytes(direct_url, timeout=12, method="HEAD")
+                            m_tag = re.search(r"/releases/download/([^/]+)/", final_url)
+                            redir_tag = m_tag.group(1) if m_tag else "latest"
+                            redir_ver = self._parse_version_tuple(redir_tag)
+                            if redir_ver and local_ver and redir_ver > local_ver:
+                                rel_meta = {
+                                    "tag": redir_tag,
+                                    "version": ".".join(str(x) for x in redir_ver),
+                                }
+                                _download_and_launch_exe(final_url, "VoxCraftStudio_Setup.exe", release_meta=rel_meta)
                                 return
+                            finish_up_to_date(cur_local["version"])
+                            return
+                        except Exception:
+                            pass
 
+                    if rel is None:
+                        if saw_empty_releases:
+                            finish_error(self._t("upd_no_releases", repo=repo_slug), warn=True)
+                            return
+
+                        repo_exists = False
+                        try:
+                            self._download_bytes(
+                                f"https://api.github.com/repos/{repo_slug}",
+                                timeout=10,
+                                token=token,
+                                accept=api_accept,
+                            )
+                            repo_exists = True
+                        except Exception:
                             repo_exists = False
-                            try:
-                                self._download_bytes(
-                                    f"https://api.github.com/repos/{repo_slug}",
-                                    timeout=10,
-                                    token=token,
-                                    accept=api_accept,
-                                )
-                                repo_exists = True
-                            except Exception:
-                                repo_exists = False
 
-                            if repo_exists:
-                                finish_message(self._t("upd_repo_no_rel", repo=repo_slug), "#f59e0b")
-                            else:
-                                hint = self._t("upd_bad_token_hint") if token else self._t("upd_private_hint")
-                                finish_message(self._t("upd_no_access", repo=repo_slug, err=last_err, hint=hint), "#f59e0b")
-                            return
-
-                        assets = rel.get("assets") or []
-                        chosen = next(
-                            (
-                                a
-                                for a in assets
-                                if str(a.get("name", "")).lower().endswith(".exe")
-                                and "setup" in str(a.get("name", "")).lower()
-                            ),
-                            None,
-                        )
-                        if chosen is None:
-                            chosen = next((a for a in assets if str(a.get("name", "")).lower().endswith(".exe")), None)
-
-                        remote_tag = str(rel.get("tag_name") or "").strip()
-                        remote_ver = (
-                            self._parse_version_tuple(remote_tag)
-                            or self._parse_version_tuple(str(chosen.get("name", "") if chosen else ""))
-                            or self._parse_version_tuple(str(rel.get("name", "")))
-                        )
-                        remote_ver_str = ".".join(str(x) for x in remote_ver) if remote_ver else ""
-                        is_newer = bool(remote_ver and local_ver and remote_ver > local_ver)
-
-                        if not is_newer:
-                            shown_tag = remote_tag or "latest"
-                            msg_up = (
-                                f"{self._t('upd_up_to_date_ver', ver=cur_local['version'])}\n"
-                                f"{self._t('upd_no_newer_note', local_ver=cur_local['version'], remote_tag=shown_tag)}"
-                            )
-                            if chosen and (chosen.get("browser_download_url") or chosen.get("url")):
-                                asset_name = chosen["name"]
-                                dl_url = chosen.get("browser_download_url", "")
-                                api_asset_url = chosen.get("url", "")
-                                rel_meta = {"tag": remote_tag, "version": remote_ver_str}
-                                finish_message(
-                                    msg_up,
-                                    "#10b981",
-                                    enable_action=True,
-                                    btn_text=self._t("upd_force_reinstall"),
-                                    cmd=lambda d=dl_url, n=asset_name, au=api_asset_url, tk_=token, rm=rel_meta: threading.Thread(
-                                        target=_download_and_launch_exe,
-                                        args=(d, n, au, tk_, rm),
-                                        daemon=True,
-                                    ).start(),
-                                )
-                            else:
-                                finish_message(msg_up, "#10b981")
-                            return
-
-                        if chosen and (chosen.get("browser_download_url") or chosen.get("url")):
-                            asset_name = chosen["name"]
-                            dl_url = chosen.get("browser_download_url", "")
-                            api_asset_url = chosen.get("url", "")
-                            rel_meta = {"tag": remote_tag, "version": remote_ver_str}
-                            _download_and_launch_exe(dl_url, asset_name, api_asset_url, token, rel_meta)
-                            return
-
-                        finish_message(self._t("upd_no_exe_rel", repo=repo_slug), "#f59e0b")
+                        if repo_exists:
+                            finish_error(self._t("upd_repo_no_rel", repo=repo_slug), warn=True)
+                        else:
+                            hint = self._t("upd_bad_token_hint") if token else self._t("upd_private_hint")
+                            finish_error(self._t("upd_no_access", repo=repo_slug, err=last_err, hint=hint), warn=True)
                         return
 
-                    git_dir = os.path.join(BASE_DIR, ".git")
-                    has_git = os.path.isdir(git_dir) and (shutil.which("git") is not None)
+                    assets = rel.get("assets") or []
+                    chosen = next(
+                        (
+                            a
+                            for a in assets
+                            if str(a.get("name", "")).lower().endswith(".exe")
+                            and "setup" in str(a.get("name", "")).lower()
+                        ),
+                        None,
+                    )
+                    if chosen is None:
+                        chosen = next((a for a in assets if str(a.get("name", "")).lower().endswith(".exe")), None)
 
-                    if has_git:
-                        rc, out = self._run_cmd(["git", "fetch", "origin"], BASE_DIR)
-                        if rc == 0:
-                            rc_u, upstream = self._run_cmd(
-                                ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], BASE_DIR
-                            )
-                            target = upstream if rc_u == 0 and upstream else "origin/main"
+                    remote_tag = str(rel.get("tag_name") or "").strip()
+                    remote_ver = (
+                        self._parse_version_tuple(remote_tag)
+                        or self._parse_version_tuple(str(chosen.get("name", "") if chosen else ""))
+                        or self._parse_version_tuple(str(rel.get("name", "")))
+                    )
+                    remote_ver_str = ".".join(str(x) for x in remote_ver) if remote_ver else ""
+                    is_newer = bool(remote_ver and local_ver and remote_ver > local_ver)
+
+                    if not is_newer:
+                        finish_up_to_date(cur_local["version"])
+                        return
+
+                    if chosen and (chosen.get("browser_download_url") or chosen.get("url")):
+                        asset_name = chosen["name"]
+                        dl_url = chosen.get("browser_download_url", "")
+                        api_asset_url = chosen.get("url", "")
+                        rel_meta = {"tag": remote_tag, "version": remote_ver_str}
+                        _download_and_launch_exe(dl_url, asset_name, api_asset_url, token, rel_meta)
+                        return
+
+                    finish_error(self._t("upd_no_exe_rel", repo=repo_slug), warn=True)
+                    return
+
+                git_dir = os.path.join(BASE_DIR, ".git")
+                has_git = os.path.isdir(git_dir) and (shutil.which("git") is not None)
+
+                if has_git:
+                    rc, _out = self._run_cmd(["git", "fetch", "origin"], BASE_DIR)
+                    if rc == 0:
+                        rc_u, upstream = self._run_cmd(
+                            ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], BASE_DIR
+                        )
+                        target = upstream if rc_u == 0 and upstream else "origin/main"
+                        rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
+                        if rc_r != 0:
+                            target = "origin/master"
                             rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
-                            if rc_r != 0:
-                                target = "origin/master"
-                                rc_r, remote_sha = self._run_cmd(["git", "rev-parse", target], BASE_DIR)
-                            rc_h, local_sha = self._run_cmd(["git", "rev-parse", "HEAD"], BASE_DIR)
-                            if rc_h == 0 and rc_r == 0 and local_sha == remote_sha:
-                                finish_message(
-                                    self._t("upd_git_up_to_date"),
-                                    "#10b981",
-                                    enable_action=True,
-                                    btn_text=self._t("upd_force_reinstall"),
-                                    cmd=lambda tgt=target: apply_git_update(tgt, force_reset=True),
-                                )
-                                return
-
-                            _run_git_update(target, force_reset=False)
+                        rc_h, local_sha = self._run_cmd(["git", "rev-parse", "HEAD"], BASE_DIR)
+                        if rc_h == 0 and rc_r == 0 and local_sha == remote_sha:
+                            finish_up_to_date(cur_local["version"])
                             return
 
-                    # Instalação via código-fonte sem .git: verifica SHA remoto antes de baixar/reiniciar
-                    remote_head_sha = ""
-                    try:
-                        raw_head, _ = self._download_bytes(
-                            f"https://api.github.com/repos/{repo_slug}/commits/HEAD",
-                            timeout=12,
-                            token=token,
-                            accept="application/vnd.github+json",
-                        )
-                        parsed_head = json.loads(raw_head.decode("utf-8"))
-                        if isinstance(parsed_head, dict):
-                            remote_head_sha = str(parsed_head.get("sha") or "").strip()
-                    except Exception:
-                        remote_head_sha = ""
-
-                    if remote_head_sha and local_commit and remote_head_sha == local_commit:
-                        finish_message(
-                            self._t("upd_src_up_to_date"),
-                            "#10b981",
-                            enable_action=True,
-                            btn_text=self._t("upd_force_reinstall"),
-                            cmd=lambda rs=repo_slug, tk_=token, sha=remote_head_sha: threading.Thread(
-                                target=_run_github_zip_update,
-                                args=(rs, tk_, sha),
-                                daemon=True,
-                            ).start(),
-                        )
+                        _run_git_update(target)
                         return
 
-                    _run_github_zip_update(repo_slug, token, remote_head_sha)
+                # Instalação via código-fonte sem .git: verifica commit/versão remota antes de baixar e reiniciar
+                remote_head_sha = ""
+                check_err: Exception | None = None
+                try:
+                    raw_head, _ = self._download_bytes(
+                        f"https://api.github.com/repos/{repo_slug}/commits/HEAD",
+                        timeout=12,
+                        token=token,
+                        accept=api_accept,
+                    )
+                    parsed_head = json.loads(raw_head.decode("utf-8"))
+                    if isinstance(parsed_head, dict):
+                        remote_head_sha = str(parsed_head.get("sha") or "").strip()
                 except Exception as exc:
-                    finish_message(self._t("upd_check_err", err=exc), "#ef4444")
+                    check_err = exc
+                    remote_head_sha = ""
 
-            threading.Thread(target=check_worker, daemon=True).start()
+                if remote_head_sha and local_commit:
+                    if remote_head_sha == local_commit:
+                        finish_up_to_date(cur_local["version"])
+                        return
+                    _run_github_zip_update(repo_slug, token, remote_head_sha)
+                    return
 
-        recheck_btn.configure(command=run_check)
-        run_check()
+                remote_tag = ""
+                remote_ver: tuple[int, ...] = ()
+                try:
+                    raw_rel, _ = self._download_bytes(
+                        f"https://api.github.com/repos/{repo_slug}/releases/latest",
+                        timeout=12,
+                        token=token,
+                        accept=api_accept,
+                    )
+                    parsed_rel = json.loads(raw_rel.decode("utf-8"))
+                    if isinstance(parsed_rel, dict) and parsed_rel.get("id"):
+                        remote_tag = str(parsed_rel.get("tag_name") or "").strip()
+                        remote_ver = self._parse_version_tuple(remote_tag) or self._parse_version_tuple(
+                            str(parsed_rel.get("name") or "")
+                        )
+                except Exception as exc:
+                    if check_err is None:
+                        check_err = exc
+
+                if remote_ver and local_ver:
+                    if remote_ver <= local_ver:
+                        finish_up_to_date(cur_local["version"])
+                        return
+                    rel_meta = {
+                        "tag": remote_tag,
+                        "version": ".".join(str(x) for x in remote_ver),
+                    }
+                    _run_github_zip_update(repo_slug, token, remote_head_sha, release_meta=rel_meta)
+                    return
+
+                if remote_head_sha:
+                    _run_github_zip_update(repo_slug, token, remote_head_sha)
+                    return
+
+                finish_error(self._t("upd_check_err", err=check_err or self._t("upd_private_hint")))
+            except Exception as exc:
+                finish_error(self._t("upd_check_err", err=exc))
+
+        threading.Thread(target=check_worker, daemon=True).start()
 
     def _relaunch_after_update(self, modal_win=None):
         self.app_config["pending_update_restore"] = True
@@ -5333,7 +5259,7 @@ class VoxCraftApp(ctk.CTk):
             except Exception:
                 pass
 
-        for attr in ("_settings_win", "_update_win", "_discord_win"):
+        for attr in ("_settings_win", "_discord_win"):
             sub = getattr(self, attr, None)
             if sub is not None:
                 try:
