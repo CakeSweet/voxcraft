@@ -52,7 +52,7 @@ def stage_installers(source: Path, destination: Path, *, repo: str, tag: str, ve
             "signature": signature,
             "url": f"https://github.com/{repo}/releases/download/{quote(tag)}/{quote(name)}",
         }
-        copies.extend([(artifact, name), (signature_file, f"{name}.sig")])
+        copies.append((artifact, name))
 
     destination.mkdir(parents=True, exist_ok=False)
     for path, name in copies:
