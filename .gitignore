@@ -12,7 +12,7 @@ __pycache__/
 /dist/
 /Output/
 /*.spec
-/internal/docs/assets/build_info.json
+/docs/assets/build_info.json
 
 # Builds do frontend e do Tauri
 node_modules/

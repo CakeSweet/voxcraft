@@ -28,7 +28,7 @@ streaming. O shell desktop é Tauri 2; o frontend é Vite/JavaScript.
     `src-back/icons/`.
 - `internal/client/public/assets/`: fontes e recursos estáticos do frontend
   Tauri; os ícones do bundle também ficam em `src-back/icons/`.
-- `internal/docs/`: site estático do projeto; `internal/docs/assets/` contém as
+- `docs/`: site estático do projeto; `docs/assets/` contém as
   imagens e fontes usadas pelo site.
 - `.github/workflows/release.yml`: automação de releases.
 - `scripts/`: scripts Python de instalação, execução, checagem e build; os
@@ -98,13 +98,13 @@ aguarda comandos em stdin; para abrir o aplicativo, use `python scripts/dev.py`.
   mas mantém os ganhos.
 - A versão aparece em mais de um lugar: `internal/core/src/__init__.py`,
   `internal/client/package.json`, `internal/client/src-back/Cargo.toml`,
-  `internal/client/src-back/tauri.conf.json` e `internal/docs/app.js`. Confira a
+  `internal/client/src-back/tauri.conf.json` e `docs/app.js`. Confira a
   consistência ao alterar uma versão.
 - `node_modules/`, `dist/`, `target/`, caches Python e
   `internal/client/src-back/gen/` são dependências/artefatos gerados; não os
   trate como fonte de verdade.
 - Não confunda `internal/client/public/assets/`,
-  `internal/docs/assets/` e os ícones de `internal/client/src-back/icons/`;
+  `docs/assets/` e os ícones de `internal/client/src-back/icons/`;
   são diretórios distintos.
 - Faça mudanças localizadas e preserve modificações preexistentes no checkout.
 
@@ -113,9 +113,8 @@ aguarda comandos em stdin; para abrir o aplicativo, use `python scripts/dev.py`.
 `.github/workflows/release.yml` publica por tags de versão e permite um build
 manual sem publicar. `scripts/release.py`
 valida a versão e só gera o `latest.json` se todos os pacotes e assinaturas
-estiverem presentes. Veja `internal/docs/release.md` para configurar as chaves
+estiverem presentes. Veja `docs/release.md` para configurar as chaves
 e validar o fluxo entre duas versões.
 
-O site fica em `internal/docs/`. Antes de enviar uma mudança que remova
-`docs/`, confira a origem do GitHub Pages: `main:/docs` não publica
-`internal/docs/`.
+O GitHub Pages publica o site estático de `main:/docs`. Preserve `docs/` e
+`docs/.nojekyll` enquanto essa for a origem configurada no Pages.
