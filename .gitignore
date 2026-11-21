@@ -1,8 +1,22 @@
-/__pycache__
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Dados locais da aplicação
 /user_presets.json
 /voxcraft_config.json
-/build
-/dist
-/Output
+
+# Artefatos de build e empacotamento
+/build/
+/dist/
+/Output/
 /*.spec
-/assets/build_info.json
+/internal/docs/assets/build_info.json
+
+# Builds do frontend e do Tauri
+node_modules/
+target/
+/internal/client/dist/
+/internal/client/src-back/binaries/
+/internal/client/src-back/gen/
