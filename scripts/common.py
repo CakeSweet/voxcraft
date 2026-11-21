@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shlex
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -20,7 +19,8 @@ VENV_PYTHON = (
     else VENV_DIR / "bin" / "python"
 )
 CORE_BUILD_DIR = ROOT / "build" / "core"
-SYSTEM_PYTHON = shlex.split(os.environ.get("PYTHON", sys.executable))
+# A variável PYTHON indica um executável, inclusive caminhos Windows com espaços.
+SYSTEM_PYTHON = [os.environ.get("PYTHON") or sys.executable]
 NPM = "npm.cmd" if os.name == "nt" else "npm"
 SIGNING_ENV = {"SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"}
 
@@ -38,10 +38,13 @@ def run(
         "check": True,
     }
 
-    if os.name == "nt" and command[0].lower().endswith((".cmd", ".bat")):
-        subprocess.run(subprocess.list2cmdline(command), shell=True, **options)
-    else:
-        subprocess.run(command, **options)
+    try:
+        if os.name == "nt" and command[0].lower().endswith((".cmd", ".bat")):
+            subprocess.run(subprocess.list2cmdline(command), shell=True, **options)
+        else:
+            subprocess.run(command, **options)
+    except FileNotFoundError as error:
+        raise RuntimeError(f"Não foi possível executar {command[0]!r}: {error}") from error
 
 
 def run_npm(args: Sequence[str]) -> None:

@@ -1,6 +1,6 @@
 (() => {
   const REPO = "CakeSweet/voxcraft";
-  const DEFAULT_VERSION = "2.1.0";
+  const DEFAULT_VERSION = "2.2.0";
 
   const PRESET_GROUPS = [
     {
@@ -382,19 +382,19 @@
       },
       source: {
         title: {
-          pt: "Execução Direta via Python 3.10+",
-          en: "Run Directly from Python 3.10+ Source",
-          es: "Ejecución Directa desde Python 3.10+",
+          pt: "Executar pelo código-fonte",
+          en: "Run from Source",
+          es: "Ejecutar desde el código fuente",
         },
         meta: {
-          pt: `${tag} · Python · NumPy / SciPy / CustomTkinter`,
-          en: `${tag} · Python · NumPy / SciPy / CustomTkinter`,
-          es: `${tag} · Python · NumPy / SciPy / CustomTkinter`,
+          pt: `${tag} · Python · Node.js · Rust / Tauri`,
+          en: `${tag} · Python · Node.js · Rust / Tauri`,
+          es: `${tag} · Python · Node.js · Rust / Tauri`,
         },
         desc: {
-          pt: "Clone o repositório oficial, instale as dependências de requirements.txt e execute o aplicativo diretamente.",
-          en: "Clone the official repository, install requirements.txt dependencies, and launch the studio directly.",
-          es: "Clona el repositorio oficial, instala las dependencias y ejecuta la aplicación directamente.",
+          pt: "Clone o repositório oficial, instale os pré-requisitos do Tauri e use os scripts de desenvolvimento.",
+          en: "Clone the official repository, install the Tauri prerequisites, and use the development scripts.",
+          es: "Clona el repositorio oficial, instala los requisitos de Tauri y usa los scripts de desarrollo.",
         },
         buttons: [
           {
@@ -407,7 +407,7 @@
             asset: { url: `https://github.com/${REPO}` },
           },
         ],
-        cmd: `git clone https://github.com/${REPO}.git && cd voxcraft && pip install -r internal/core/requirements.txt && python internal/core/app.py`,
+        cmd: `git clone https://github.com/${REPO}.git && cd voxcraft && python scripts/install.py && python scripts/dev.py`,
       },
     };
 
@@ -456,7 +456,7 @@
       if (relLink && data.html_url) relLink.href = data.html_url;
       renderDownloadCard();
     } catch {
-      // Mantém versão padrão v2.1.0 caso a API esteja indisponível offline
+      // Mantém a versão padrão caso a API esteja indisponível.
     }
   }
 
