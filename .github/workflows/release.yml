@@ -1,4 +1,4 @@
-name: Release
+name: release
 
 on:
   push:
@@ -16,11 +16,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            label: Windows
+            label: windows
             platform: windows
             triple: x86_64-pc-windows-msvc
           - os: ubuntu-22.04
-            label: Linux
+            label: linux
             platform: linux
             triple: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
@@ -37,19 +37,19 @@ jobs:
           cache: npm
           cache-dependency-path: internal/client/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
-      - name: Conferir a versão da tag
+      - name: conferir a versão da tag
         if: github.event_name == 'push'
         run: python scripts/release.py check
-      - name: Instalar dependências do Linux
+      - name: instalar dependências do linux
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libportaudio2 rpm
-      - name: Instalar dependências do build
+      - name: instalar dependências do build
         run: |
           python -m pip install -r internal/core/requirements.txt -r scripts/requirements-build.txt
           npm ci --prefix internal/client
-      - name: Gerar instaladores
+      - name: gerar instaladores
         env:
           UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
           SIGNING_PRIVATE_KEY: ${{ secrets.SIGNING_PRIVATE_KEY }}
@@ -66,7 +66,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publicar
+    name: publicar
     if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
@@ -81,9 +81,9 @@ jobs:
         with:
           pattern: bundles-*
           path: build/artifacts
-      - name: Preparar instaladores e latest.json
+      - name: preparar instaladores e latest.json
         run: python scripts/release.py stage build/artifacts build/release
-      - name: Publicar no GitHub Releases
+      - name: publicar no github releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --latest build/release/*
