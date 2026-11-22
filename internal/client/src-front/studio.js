@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
-import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { setupUpdater } from "./updates.js";
 
 const TEXT = {
   pt: {
+    cancel: "Cancelar", notice: "Aviso",
     preset: "Preset", current_config: "Configuração atual", save: "Salvar", delete: "Excluir",
     settings: "Configurações", update: "Atualizar", original_voice: "Voz Original",
     start_audio: "Iniciar Áudio", stop_audio: "Parar Áudio", audio_section: "Áudio", microphone: "Microfone",
@@ -14,6 +14,8 @@ const TEXT = {
     refresh_devices: "Atualizar Dispositivos",
     loading_devices: "Listando dispositivos…", stopped: "Parado", hotkey_section: "Atalho", enable_hotkey: "Ativar atalho",
     key_label: "Atalho", define_key: "Definir atalho",
+    hotkey_local_only: "Atalho global indisponível. Funciona apenas com a janela focada.",
+    hotkey_portal_binding: "Atalho vinculado pelo sistema: {shortcut}",
     hold_key: "Segurar tecla", levels_section: "Níveis", input_lbl: "Entrada", output_lbl: "Saída",
     gate_open: "● Noise Gate: Aberto", gate_closed: "● Noise Gate: Silenciado",
     dynamics_section: "Dinâmica & Ganho", input_gain: "Ganho de Entrada", noise_gate: "Noise Gate",
@@ -42,6 +44,7 @@ const TEXT = {
     upd_header: "Atualização do VoxCraft Studio", upd_check_btn: "Verificar",
     no_devices: "Nenhum dispositivo encontrado", audio_starting: "Iniciando áudio…", audio_started: "Áudio ativo",
     devices_refreshed: "Dispositivos atualizados.", core_unavailable: "Core Python indisponível",
+    core_starting: "Preparando o motor de áudio…",
     browser_mode: "Abra pelo Tauri para controlar o core Python.", save_preset_prompt: "Nome para este preset:",
     delete_preset_confirm: "Excluir o preset personalizado “{name}”?", preset_saved: "Preset salvo.",
     preset_deleted: "Preset excluído.", only_custom_delete: "Somente presets personalizados podem ser excluídos.",
@@ -54,6 +57,7 @@ const TEXT = {
     virtual_output_setup_failed: "Não foi possível configurar a saída virtual automaticamente.",
   },
   en: {
+    cancel: "Cancel", notice: "Notice",
     preset: "Preset", current_config: "Current configuration", save: "Save", delete: "Delete",
     settings: "Settings", update: "Update", original_voice: "Original Voice",
     start_audio: "Start Audio", stop_audio: "Stop Audio", audio_section: "Audio", microphone: "Microphone",
@@ -62,6 +66,8 @@ const TEXT = {
     refresh_devices: "Refresh Devices",
     loading_devices: "Listing devices…", stopped: "Stopped", hotkey_section: "Hotkey", enable_hotkey: "Enable hotkey",
     key_label: "Shortcut", define_key: "Set shortcut",
+    hotkey_local_only: "Global shortcut unavailable. It only works while the window is focused.",
+    hotkey_portal_binding: "Shortcut assigned by the system: {shortcut}",
     hold_key: "Hold key", levels_section: "Levels", input_lbl: "Input", output_lbl: "Output",
     gate_open: "● Noise Gate: Open", gate_closed: "● Noise Gate: Muted",
     dynamics_section: "Dynamics & Gain", input_gain: "Input Gain", noise_gate: "Noise Gate",
@@ -90,6 +96,7 @@ const TEXT = {
     upd_header: "VoxCraft Studio Update", upd_check_btn: "Check",
     no_devices: "No devices found", audio_starting: "Starting audio…", audio_started: "Audio active",
     devices_refreshed: "Devices updated.", core_unavailable: "Python core unavailable",
+    core_starting: "Preparing the audio engine…",
     browser_mode: "Open the Tauri app to control the Python core.", save_preset_prompt: "Name this preset:",
     delete_preset_confirm: "Delete custom preset “{name}”?", preset_saved: "Preset saved.",
     preset_deleted: "Preset deleted.", only_custom_delete: "Only custom presets can be deleted.",
@@ -102,6 +109,7 @@ const TEXT = {
     virtual_output_setup_failed: "Could not configure the virtual output automatically.",
   },
   es: {
+    cancel: "Cancelar", notice: "Aviso",
     preset: "Preset", current_config: "Configuración actual", save: "Guardar", delete: "Eliminar",
     settings: "Configuración", update: "Actualizar", original_voice: "Voz Original",
     start_audio: "Iniciar Audio", stop_audio: "Detener Audio", audio_section: "Audio", microphone: "Micrófono",
@@ -110,6 +118,8 @@ const TEXT = {
     refresh_devices: "Actualizar Dispositivos",
     loading_devices: "Listando dispositivos…", stopped: "Detenido", hotkey_section: "Atajo", enable_hotkey: "Activar atajo",
     key_label: "Atajo", define_key: "Asignar atajo",
+    hotkey_local_only: "Atajo global no disponible. Solo funciona con la ventana enfocada.",
+    hotkey_portal_binding: "Atajo asignado por el sistema: {shortcut}",
     hold_key: "Mantener tecla", levels_section: "Niveles", input_lbl: "Entrada", output_lbl: "Salida",
     gate_open: "● Noise Gate: Abierto", gate_closed: "● Noise Gate: Silenciado",
     dynamics_section: "Dinámica y Ganancia", input_gain: "Ganancia de Entrada", noise_gate: "Noise Gate",
@@ -138,6 +148,7 @@ const TEXT = {
     upd_header: "Actualización de VoxCraft Studio", upd_check_btn: "Verificar",
     no_devices: "No se encontraron dispositivos", audio_starting: "Iniciando audio…", audio_started: "Audio activo",
     devices_refreshed: "Dispositivos actualizados.", core_unavailable: "Core Python no disponible",
+    core_starting: "Preparando el motor de audio…",
     browser_mode: "Abre la aplicación Tauri para controlar el core Python.", save_preset_prompt: "Nombre para este preset:",
     delete_preset_confirm: "¿Eliminar el preset personalizado “{name}”?", preset_saved: "Preset guardado.",
     preset_deleted: "Preset eliminado.", only_custom_delete: "Solo se pueden eliminar presets personalizados.",
@@ -334,6 +345,7 @@ let virtualOutputSetupSupported = false;
 let virtualOutputSetupCanRetry = false;
 let pendingParams = {};
 let paramTimer = null;
+let parameterUpdateQueue = Promise.resolve();
 let meterBusy = false;
 let captureHotkey = false;
 let hotkey = localStorage.getItem("voxcraft-hotkey") || "F9";
@@ -341,10 +353,12 @@ const HOTKEY_MODIFIER_ORDER = ["CTRL", "ALT", "SHIFT", "SUPER"];
 let hotkeyDown = false;
 let holdBaseBypass = null;
 let registeredHotkey = null;
-let registeredPortalHotkey = null;
-let globalHotkeyRegistered = false;
-let unlistenPortalHotkey = null;
+let listenForGlobalHotkey = null;
+let waylandHotkeys = null;
+let hotkeyGlobalError = "";
+let portalHotkeyDescription = "";
 let hotkeyRegistrationQueue = Promise.resolve();
+let showMessage;
 
 function normalizeHotkeyKey(key) {
   const value = String(key).trim();
@@ -561,6 +575,7 @@ function applyLanguage(nextLanguage) {
   });
   document.querySelector("#language-select").value = language;
   document.querySelector("#hotkey-key").setAttribute("aria-description", t("define_key"));
+  renderGlobalHotkeyStatus();
   updateAudioButton();
   updateGateIndicator(true);
 }
@@ -631,24 +646,28 @@ function updateSliderValue(input) {
       : formatSliderValue(value, Number(input.step), input.dataset.unit || "");
 }
 
-function scheduleParameterUpdate(key, value) {
+function scheduleParameterUpdate(key, value, immediate = false) {
   params[key] = value;
   if (!coreConnected) return;
   saveVoiceSettings();
   pendingParams[key] = value;
   window.clearTimeout(paramTimer);
-  paramTimer = window.setTimeout(flushParameterUpdates, 90);
+  if (immediate) {
+    void flushParameterUpdates();
+  } else {
+    paramTimer = window.setTimeout(flushParameterUpdates, 90);
+  }
 }
 
-async function flushParameterUpdates() {
-  if (!coreConnected || Object.keys(pendingParams).length === 0) return;
+function flushParameterUpdates() {
+  if (!coreConnected || Object.keys(pendingParams).length === 0) return parameterUpdateQueue;
   const patch = pendingParams;
   pendingParams = {};
-  try {
-    await coreRequest("set_params", { params: patch });
-  } catch (error) {
-    setAudioStatus(String(error), audioRunning, true);
-  }
+  // Keep press/release patches distinct and in order, even when sent back-to-back.
+  parameterUpdateQueue = parameterUpdateQueue
+    .then(() => coreRequest("set_params", { params: patch }))
+    .catch((error) => setAudioStatus(String(error), audioRunning, true));
+  return parameterUpdateQueue;
 }
 
 function createSwitch(param, labelKey, options = {}) {
@@ -853,7 +872,10 @@ function renderMixerTab(panel) {
   reset.dataset.i18n = "reset_effects";
   reset.textContent = t("reset_effects");
   reset.addEventListener("click", async () => {
-    if (!window.confirm(t("reset_confirm"))) return;
+    if (!(await showMessage({
+      type: "confirm", title: t("reset_effects"), message: t("reset_confirm"),
+      acceptLabel: t("reset_effects"), danger: true,
+    }))) return;
     await applyPreset("Normal");
   });
   panel.append(title, grid, reset);
@@ -1226,28 +1248,34 @@ async function applyPreset(value) {
 }
 
 async function savePreset() {
-  const name = window.prompt(t("save_preset_prompt"));
-  if (!name?.trim()) return;
+  const name = await showMessage({
+    type: "input", title: t("save"), message: t("save_preset_prompt"), acceptLabel: t("save"),
+  });
+  if (name === null) return;
   try {
     await flushParameterUpdates();
-    await coreRequest("save_preset", { name: name.trim() });
-    selectedPreset = `★ ${name.trim()}`;
+    await coreRequest("save_preset", { name });
+    selectedPreset = `★ ${name}`;
     saveVoiceSettings();
     await refreshPresets();
     setAudioStatus(t("preset_saved"), audioRunning);
   } catch (error) {
-    setAudioStatus(String(error), audioRunning, true);
+    await showMessage({ title: t("notice"), message: String(error) });
   }
 }
 
 async function deletePreset() {
   const selected = document.querySelector("#preset-select").value;
   if (!selected.startsWith("★ ")) {
-    setAudioStatus(t("only_custom_delete"), audioRunning);
+    await showMessage({ title: t("notice"), message: t("only_custom_delete") });
     return;
   }
   const name = selected.slice(2);
-  if (!window.confirm(t("delete_preset_confirm").replace("{name}", name))) return;
+  if (!(await showMessage({
+    type: "confirm", title: t("delete"),
+    message: t("delete_preset_confirm").replace("{name}", () => name),
+    acceptLabel: t("delete"), danger: true,
+  }))) return;
   try {
     window.clearTimeout(paramTimer);
     await flushParameterUpdates();
@@ -1259,7 +1287,7 @@ async function deletePreset() {
     renderControlValues();
     setAudioStatus(t("preset_deleted"), audioRunning);
   } catch (error) {
-    setAudioStatus(String(error), audioRunning, true);
+    await showMessage({ title: t("notice"), message: String(error) });
   }
 }
 
@@ -1315,7 +1343,7 @@ async function toggleAudio() {
 function setBypass(enabled) {
   params.bypass = Boolean(enabled);
   updateBypassButton();
-  scheduleParameterUpdate("bypass", params.bypass);
+  scheduleParameterUpdate("bypass", params.bypass, true);
 }
 
 function releaseHeldHotkey() {
@@ -1336,62 +1364,70 @@ function pressHotkey() {
   }
 }
 
-function handleGlobalHotkey(event) {
-  if (event.state === "Pressed") pressHotkey();
-  if (event.state === "Released") releaseHeldHotkey();
+function renderGlobalHotkeyStatus() {
+  const status = document.querySelector("#hotkey-status");
+  status.textContent = hotkeyGlobalError
+    ? t("hotkey_local_only")
+    : portalHotkeyDescription
+      ? t("hotkey_portal_binding").replace("{shortcut}", () => portalHotkeyDescription)
+      : "";
+  status.title = hotkeyGlobalError;
+  status.hidden = !status.textContent;
+}
+
+function handleGlobalHotkey(state) {
+  if (state === "Pressed" && registeredHotkey === hotkey) pressHotkey();
+  if (state === "Released") releaseHeldHotkey();
+  if (state === "Unavailable") {
+    releaseHeldHotkey();
+    registeredHotkey = null;
+    portalHotkeyDescription = "";
+    hotkeyGlobalError = "XDG GlobalShortcuts session closed";
+    renderGlobalHotkeyStatus();
+  }
 }
 
 function configureGlobalHotkey() {
   if (!("__TAURI_INTERNALS__" in window)) return Promise.resolve();
 
-  const desiredHotkey = !captureHotkey
-    && document.querySelector("#hotkey-enabled").checked
-    ? hotkey
-    : null;
-
-  hotkeyRegistrationQueue = hotkeyRegistrationQueue.catch(() => {}).then(async () => {
+  hotkeyRegistrationQueue = hotkeyRegistrationQueue.then(async () => {
+    const desiredHotkey = !captureHotkey
+      && document.querySelector("#hotkey-enabled").checked
+      ? hotkey
+      : null;
+    if (registeredHotkey === desiredHotkey && (!hotkeyGlobalError || desiredHotkey)) return;
     try {
-      const waylandSession = await invoke("is_wayland_session");
-      if (waylandSession) {
-        if (registeredHotkey) {
-          await unregister(registeredHotkey);
-          registeredHotkey = null;
-        }
-        if (!unlistenPortalHotkey) {
-          unlistenPortalHotkey = await listen("voxcraft-global-hotkey", ({ payload }) => {
-            handleGlobalHotkey(payload);
-          });
-        }
-        if (registeredPortalHotkey !== desiredHotkey) {
-          await invoke("set_wayland_global_shortcut", { shortcut: desiredHotkey });
-          registeredPortalHotkey = desiredHotkey;
-        }
-        globalHotkeyRegistered = Boolean(desiredHotkey);
-        return;
-      }
-
-      if (registeredPortalHotkey !== null) {
-        await invoke("set_wayland_global_shortcut", { shortcut: null });
-        registeredPortalHotkey = null;
-      }
-      if (registeredHotkey === desiredHotkey) {
-        globalHotkeyRegistered = Boolean(desiredHotkey);
-        return;
-      }
-      if (registeredHotkey) {
-        await unregister(registeredHotkey);
-        registeredHotkey = null;
-      }
       if (desiredHotkey) {
-        await register(desiredHotkey, handleGlobalHotkey);
-        registeredHotkey = desiredHotkey;
+        listenForGlobalHotkey ??= await listen("voxcraft-global-hotkey", ({ payload }) => {
+          handleGlobalHotkey(payload);
+        });
       }
-      globalHotkeyRegistered = Boolean(desiredHotkey);
+      const previous = registeredHotkey;
+      portalHotkeyDescription = "";
+      if (previous || desiredHotkey) {
+        waylandHotkeys ??= await invoke("is_wayland_session");
+        if (waylandHotkeys) {
+          registeredHotkey = null;
+          portalHotkeyDescription =
+            await invoke("set_wayland_global_shortcut", { shortcut: desiredHotkey }) ?? "";
+        } else {
+          if (previous) {
+            await invoke("configure_native_hotkey", { shortcut: previous, enabled: false });
+            registeredHotkey = null;
+          }
+          if (desiredHotkey) {
+            await invoke("configure_native_hotkey", { shortcut: desiredHotkey, enabled: true });
+          }
+        }
+      }
+      releaseHeldHotkey();
+      registeredHotkey = desiredHotkey;
+      hotkeyGlobalError = "";
     } catch (error) {
-      registeredPortalHotkey = null;
-      globalHotkeyRegistered = false;
-      console.error("Não foi possível registrar o atalho global:", error);
+      hotkeyGlobalError = String(error);
+      console.error("Não foi possível configurar o atalho global:", error);
     }
+    renderGlobalHotkeyStatus();
   });
 
   return hotkeyRegistrationQueue;
@@ -1465,7 +1501,7 @@ function setupHotkey() {
       finishCapture();
       return;
     }
-    if (globalHotkeyRegistered || event.repeat
+    if (registeredHotkey === hotkey || event.repeat
       || !document.querySelector("#hotkey-enabled").checked
       || !matchesHotkeyEvent(event, hotkey)) return;
     const target = event.target;
@@ -1480,13 +1516,13 @@ function setupHotkey() {
     }
     const modifier = modifierKeyFromEvent(event);
     const { key, modifiers } = hotkeyParts(hotkey);
-    if (!globalHotkeyRegistered && hotkeyDown
+    if (registeredHotkey !== hotkey && hotkeyDown
       && (event.code === key || (modifier && modifiers.has(modifier)))) {
       releaseHeldHotkey();
     }
   });
   window.addEventListener("blur", () => {
-    if (!globalHotkeyRegistered) releaseHeldHotkey();
+    if (registeredHotkey !== hotkey) releaseHeldHotkey();
   });
 
   void configureGlobalHotkey();
@@ -1516,6 +1552,14 @@ function setupDialogs() {
   const dialogs = [...document.querySelectorAll(".dialog")];
   let activeDialog = null;
   let restoreFocusTo = null;
+  const messageDialog = document.querySelector("#message-dialog");
+  const messageForm = document.querySelector("#message-form");
+  const messageTitle = document.querySelector("#message-title");
+  const messageText = document.querySelector("#message-text");
+  const messageInput = document.querySelector("#message-input");
+  const messageCancel = document.querySelector("#message-cancel");
+  const messageAccept = document.querySelector("#message-accept");
+  let pendingMessage = null;
 
   const setContentInert = (inert) => {
     for (const child of appShell.children) {
@@ -1527,11 +1571,12 @@ function setupDialogs() {
     if (dialog.open) dialog.close();
   };
 
-  const openDialog = (dialog) => {
+  const openDialog = (dialog, initialFocus) => {
     if (activeDialog === dialog) return;
+    const trigger = activeDialog ? restoreFocusTo : document.activeElement;
     if (activeDialog) closeDialog(activeDialog);
 
-    restoreFocusTo = document.activeElement;
+    restoreFocusTo = trigger;
     activeDialog = dialog;
     modalLayer.hidden = false;
     setContentInert(true);
@@ -1541,11 +1586,16 @@ function setupDialogs() {
     const firstFocusable = dialog.querySelector(
       '[autofocus], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
     );
-    (firstFocusable || dialog).focus();
+    (initialFocus || firstFocusable || dialog).focus();
   };
 
   for (const dialog of dialogs) {
     dialog.addEventListener("close", () => {
+      if (dialog === messageDialog && pendingMessage) {
+        const { resolve, value } = pendingMessage;
+        pendingMessage = null;
+        resolve(value);
+      }
       if (activeDialog !== dialog) return;
       activeDialog = null;
       dialog.removeAttribute("aria-modal");
@@ -1558,6 +1608,36 @@ function setupDialogs() {
       restoreFocusTo = null;
     });
   }
+
+  showMessage = ({ type = "alert", title, message, acceptLabel = "OK", danger = false }) => {
+    if (pendingMessage) return Promise.resolve(null);
+
+    messageTitle.textContent = title;
+    messageText.textContent = message;
+    messageInput.value = "";
+    messageInput.hidden = type !== "input";
+    messageCancel.hidden = type === "alert";
+    messageAccept.disabled = type === "input";
+    messageAccept.textContent = acceptLabel;
+    messageAccept.classList.toggle("button-danger", danger);
+    messageAccept.classList.toggle("button-primary", !danger);
+
+    return new Promise((resolve) => {
+      pendingMessage = { resolve, value: null, type };
+      openDialog(messageDialog, type === "input" ? messageInput
+        : type === "confirm" ? messageCancel : messageAccept);
+    });
+  };
+
+  messageInput.addEventListener("input", () => {
+    messageAccept.disabled = !messageInput.value.trim();
+  });
+  messageForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!pendingMessage || messageAccept.disabled) return;
+    pendingMessage.value = pendingMessage.type === "input" ? messageInput.value.trim() : true;
+    closeDialog(messageDialog);
+  });
 
   window.addEventListener("keydown", (event) => {
     if (!activeDialog || captureHotkey) return;
@@ -1594,12 +1674,15 @@ function setupDialogs() {
   }, true);
 
   document.querySelector("#open-settings").addEventListener("click", () => {
+    if (pendingMessage) return;
     openDialog(document.querySelector("#settings-dialog"));
   });
   document.querySelector("#open-updates").addEventListener("click", () => {
     const dialog = document.querySelector("#updates-dialog");
+    if (pendingMessage) return;
     openDialog(dialog);
-    document.querySelector("#check-updates").click();
+    const button = document.querySelector("#check-updates");
+    if (button.dataset.action === "check") button.click();
   });
   document.querySelectorAll("[data-close-dialog]").forEach((button) => {
     button.addEventListener("click", () =>
@@ -1728,6 +1811,9 @@ async function connectCore() {
     return;
   }
 
+  const powerButton = document.querySelector("#power-button");
+  powerButton.disabled = true;
+  setAudioStatus(t("core_starting"), false);
   try {
     const status = await invoke("get_runtime_status");
     if (!status.coreConnected) {
@@ -1785,6 +1871,8 @@ async function connectCore() {
   } catch (error) {
     coreConnected = false;
     setAudioStatus(`${t("core_unavailable")}: ${String(error)}`, false, true);
+  } finally {
+    powerButton.disabled = !coreConnected;
   }
 }
 
@@ -1799,10 +1887,18 @@ export function initializeStudio() {
   updateAudioButton();
   updateBypassButton();
   setupUpdater();
-  void connectCore();
 
   window.addEventListener("resize", () => {
     drawEqCurve();
     drawWaveform([]);
   });
+
+  if ("__TAURI_INTERNALS__" in window) {
+    // Reveal the themed shell first; startup of the audio engine must not gate it.
+    void getCurrentWindow().show()
+      .catch((error) => console.error("Não foi possível mostrar a janela:", error))
+      .then(connectCore);
+  } else {
+    void connectCore();
+  }
 }

@@ -1376,6 +1376,37 @@ input[type="range"]::-moz-range-thumb {
     margin-top: 19px;
 }
 
+.message-dialog {
+    max-width: 420px;
+}
+
+.message-text {
+    margin: 0;
+    color: var(--text-body);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.message-input {
+    width: 100%;
+    height: 34px;
+    margin-top: 12px;
+    padding: 0 10px;
+    border: 1px solid var(--control-border);
+    border-radius: 8px;
+    background: var(--control-bg);
+    color: var(--text-primary);
+}
+
+.message-dialog [hidden] {
+    display: none;
+}
+
+.message-dialog :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 .update-status {
     margin: 0;
     color: var(--text-body);

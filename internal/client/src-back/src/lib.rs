@@ -13,6 +13,8 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, State,
 };
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 struct CoreProcess {
     child: Child,
@@ -59,7 +61,7 @@ impl CoreProcess {
         Ok(Command::new(core))
     }
 
-    fn spawn() -> Result<Self, String> {
+    fn spawn() -> Result<(Self, Value), String> {
         let mut command = Self::command()?;
         #[cfg(target_os = "windows")]
         {
@@ -87,8 +89,8 @@ impl CoreProcess {
             stdout: BufReader::new(stdout),
             request_id: 0,
         };
-        process.request("ping", json!({}))?;
-        Ok(process)
+        let status = process.request("ping", json!({}))?;
+        Ok((process, status))
     }
 
     fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
@@ -162,45 +164,88 @@ impl Drop for CoreProcess {
     }
 }
 
-struct CoreState {
-    process: Mutex<Option<CoreProcess>>,
-    startup_error: Option<String>,
+enum CoreConnection {
+    NotStarted,
+    Running(CoreProcess),
+    Failed(String),
+    Stopped,
 }
 
+struct CoreState(Mutex<CoreConnection>);
+
 impl CoreState {
-    fn launch() -> Self {
-        match CoreProcess::spawn() {
-            Ok(process) => Self {
-                process: Mutex::new(Some(process)),
-                startup_error: None,
-            },
-            Err(error) => {
-                eprintln!("VoxCraft Python core: {error}");
-                Self {
-                    process: Mutex::new(None),
-                    startup_error: Some(error),
+    fn new() -> Self {
+        Self(Mutex::new(CoreConnection::NotStarted))
+    }
+
+    fn connect(&self) -> Result<Value, String> {
+        let mut connection = self
+            .0
+            .lock()
+            .map_err(|_| "estado do core Python indisponível".to_string())?;
+        if matches!(*connection, CoreConnection::NotStarted) {
+            return match CoreProcess::spawn() {
+                Ok((process, status)) => {
+                    *connection = CoreConnection::Running(process);
+                    Ok(status)
                 }
+                Err(error) => {
+                    eprintln!("VoxCraft Python core: {error}");
+                    *connection = CoreConnection::Failed(error.clone());
+                    Err(error)
+                }
+            };
+        }
+        Self::request_connected(&mut connection, "ping", json!({}))
+    }
+
+    fn request(&self, method: &str, params: Value) -> Result<Value, String> {
+        let mut connection = self
+            .0
+            .lock()
+            .map_err(|_| "estado do core Python indisponível".to_string())?;
+        Self::request_connected(&mut connection, method, params)
+    }
+
+    fn request_connected(
+        connection: &mut CoreConnection,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, String> {
+        match connection {
+            CoreConnection::Running(process) => process.request(method, params),
+            CoreConnection::Failed(error) => Err(error.clone()),
+            CoreConnection::NotStarted | CoreConnection::Stopped => {
+                Err("core Python não iniciado".into())
             }
         }
     }
 
-    fn request(&self, method: &str, params: Value) -> Result<Value, String> {
-        let mut process = self
-            .process
-            .lock()
-            .map_err(|_| "estado do core Python indisponível".to_string())?;
-        let process = process.as_mut().ok_or_else(|| {
-            self.startup_error
-                .clone()
-                .unwrap_or_else(|| "core Python não iniciado".to_string())
-        })?;
-        process.request(method, params)
-    }
-
     fn shutdown(&self) {
-        if let Ok(mut process) = self.process.lock() {
-            process.take();
+        if let Ok(mut connection) = self.0.lock() {
+            let previous = std::mem::replace(&mut *connection, CoreConnection::Stopped);
+            drop(connection);
+            drop(previous);
         }
+    }
+}
+
+#[cfg(test)]
+mod core_startup_tests {
+    use super::{CoreConnection, CoreState};
+    use serde_json::json;
+
+    #[test]
+    fn creating_core_state_does_not_start_python() {
+        let core = CoreState::new();
+        assert!(matches!(
+            *core.0.lock().unwrap(),
+            CoreConnection::NotStarted
+        ));
+        assert!(core.request("ping", json!({})).is_err());
+        core.shutdown();
+        assert!(core.connect().is_err());
+        assert!(matches!(*core.0.lock().unwrap(), CoreConnection::Stopped));
     }
 }
 
@@ -246,8 +291,12 @@ struct RuntimeStatus {
 }
 
 #[tauri::command]
-fn get_runtime_status(core: State<'_, Arc<CoreState>>) -> RuntimeStatus {
-    match core.request("ping", json!({})) {
+async fn get_runtime_status(core: State<'_, Arc<CoreState>>) -> Result<RuntimeStatus, String> {
+    let core = Arc::clone(core.inner());
+    let status = tauri::async_runtime::spawn_blocking(move || core.connect())
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(match status {
         Ok(status) => RuntimeStatus {
             shell: "tauri",
             core_connected: true,
@@ -262,11 +311,11 @@ fn get_runtime_status(core: State<'_, Arc<CoreState>>) -> RuntimeStatus {
             core_connected: false,
             message: format!("Core Python indisponível: {error}"),
         },
-    }
+    })
 }
 
 #[tauri::command]
-fn core_request(
+async fn core_request(
     core: State<'_, Arc<CoreState>>,
     method: String,
     params: Option<Value>,
@@ -289,7 +338,12 @@ fn core_request(
     if !ALLOWED_METHODS.contains(&method.as_str()) {
         return Err(format!("comando do core não permitido: {method}"));
     }
-    core.request(&method, params.unwrap_or_else(|| json!({})))
+    let core = Arc::clone(core.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        core.request(&method, params.unwrap_or_else(|| json!({})))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -301,22 +355,54 @@ fn updater_is_configured() -> bool {
 fn is_wayland_session() -> bool {
     #[cfg(target_os = "linux")]
     {
-        let forced_x11 = std::env::var("GDK_BACKEND").is_ok_and(|backend| {
-            backend
-                .split(',')
-                .next()
-                .is_some_and(|name| name.trim().eq_ignore_ascii_case("x11"))
-        });
-        let wayland_session = std::env::var("XDG_SESSION_TYPE")
+        // XWayland grabs cannot reach native Wayland apps, even if GTK uses X11.
+        return std::env::var("XDG_SESSION_TYPE")
             .is_ok_and(|session| session.eq_ignore_ascii_case("wayland"))
-            || std::env::var_os("WAYLAND_DISPLAY").is_some();
-        return wayland_session && !forced_x11;
+            || std::env::var_os("WAYLAND_DISPLAY").is_some_and(|display| !display.is_empty());
     }
 
     #[cfg(not(target_os = "linux"))]
     {
         false
     }
+}
+
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+fn emit_hotkey(app: &tauri::AppHandle, state: &str) {
+    let _ = app.emit_to("main", "voxcraft-global-hotkey", state);
+}
+
+#[tauri::command]
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+async fn configure_native_hotkey(
+    app: tauri::AppHandle,
+    shortcut: String,
+    enabled: bool,
+) -> Result<(), String> {
+    if is_wayland_session() {
+        return Err("atalhos nativos indisponíveis nesta sessão Wayland".into());
+    }
+    let manager = app.global_shortcut();
+    let result = if enabled {
+        manager.on_shortcut(shortcut.as_str(), |app, _, event| {
+            emit_hotkey(
+                app,
+                match event.state {
+                    ShortcutState::Pressed => "Pressed",
+                    ShortcutState::Released => "Released",
+                },
+            );
+        })
+    } else {
+        manager.unregister(shortcut.as_str())
+    };
+    result.map_err(|error| error.to_string())
+}
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+#[tauri::command]
+fn configure_native_hotkey() -> Result<(), String> {
+    Err("atalhos nativos indisponíveis nesta plataforma".into())
 }
 
 #[cfg(target_os = "linux")]
@@ -434,7 +520,7 @@ async fn set_wayland_global_shortcut(
     app: tauri::AppHandle,
     state: State<'_, PortalShortcutState>,
     shortcut: Option<String>,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let previous = state
         .task
         .lock()
@@ -446,7 +532,7 @@ async fn set_wayland_global_shortcut(
     }
 
     let Some(shortcut) = shortcut else {
-        return Ok(());
+        return Ok(None);
     };
     if !is_wayland_session() {
         return Err("o portal de atalhos só é usado em sessões Wayland".into());
@@ -455,6 +541,8 @@ async fn set_wayland_global_shortcut(
     use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
 
     const SHORTCUT_ID: &str = "com.cakesweet.voxcraft.toggle_bypass";
+    let trigger = portal_preferred_trigger(&shortcut)
+        .ok_or_else(|| "combinação não suportada pelo portal de atalhos".to_string())?;
     let portal = GlobalShortcuts::new()
         .await
         .map_err(|error| format!("não foi possível conectar ao portal de atalhos: {error}"))?;
@@ -471,51 +559,68 @@ async fn set_wayland_global_shortcut(
         .await
         .map_err(|error| format!("não foi possível ouvir liberações do portal: {error}"))?;
 
-    let trigger = portal_preferred_trigger(&shortcut);
     let definition = NewShortcut::new(
         SHORTCUT_ID,
         "Atalho do VoxCraft Studio para alternar a voz original",
     )
-    .preferred_trigger(trigger.as_deref());
-    let request = portal
-        .bind_shortcuts(&session, &[definition], None, Default::default())
-        .await
-        .map_err(|error| format!("não foi possível solicitar o atalho ao portal: {error}"))?;
-    let response = request
-        .response()
-        .map_err(|error| format!("o portal não confirmou o atalho: {error}"))?;
-    if !response
-        .shortcuts()
-        .iter()
-        .any(|bound| bound.id() == SHORTCUT_ID)
-    {
-        return Err("o compositor não vinculou o atalho global solicitado".into());
-    }
+    .preferred_trigger(trigger.as_str());
+    let binding = async {
+        let request = portal
+            .bind_shortcuts(&session, &[definition], None, Default::default())
+            .await
+            .map_err(|error| format!("não foi possível solicitar o atalho ao portal: {error}"))?;
+        let response = request
+            .response()
+            .map_err(|error| format!("o portal não confirmou o atalho: {error}"))?;
+        response
+            .shortcuts()
+            .iter()
+            .find(|bound| bound.id() == SHORTCUT_ID)
+            .map(|bound| bound.trigger_description().to_string())
+            .ok_or_else(|| "o compositor não vinculou o atalho global solicitado".to_string())
+    };
+    let description = match binding.await {
+        Ok(description) => description,
+        Err(error) => {
+            let _ = session.close().await;
+            return Err(error);
+        }
+    };
 
     let (cancel, mut cancel_rx) = tokio::sync::oneshot::channel();
     let event_app = app.clone();
     let join = tauri::async_runtime::spawn(async move {
         let _portal = portal;
-        let _session = session;
-        loop {
+        let Ok(mut closed) = session.receive_closed().await else {
+            emit_hotkey(&event_app, "Unavailable");
+            let _ = session.close().await;
+            return;
+        };
+        let cancelled = loop {
             tokio::select! {
-                _ = &mut cancel_rx => break,
+                biased;
+                _ = &mut cancel_rx => break true,
+                _ = closed.next() => break false,
                 event = activated.next() => match event {
                     Some(event) if event.shortcut_id() == SHORTCUT_ID => {
-                        let _ = event_app.emit("voxcraft-global-hotkey", json!({ "state": "Pressed" }));
+                        emit_hotkey(&event_app, "Pressed");
                     }
                     Some(_) => {}
-                    None => break,
+                    None => break false,
                 },
                 event = deactivated.next() => match event {
                     Some(event) if event.shortcut_id() == SHORTCUT_ID => {
-                        let _ = event_app.emit("voxcraft-global-hotkey", json!({ "state": "Released" }));
+                        emit_hotkey(&event_app, "Released");
                     }
                     Some(_) => {}
-                    None => break,
+                    None => break false,
                 },
             }
+        };
+        if !cancelled {
+            emit_hotkey(&event_app, "Unavailable");
         }
+        let _ = session.close().await;
     });
 
     *state
@@ -523,12 +628,12 @@ async fn set_wayland_global_shortcut(
         .lock()
         .map_err(|_| "estado do atalho global indisponível".to_string())? =
         Some(PortalShortcutTask { cancel, join });
-    Ok(())
+    Ok(Some(description))
 }
 
 #[cfg(not(target_os = "linux"))]
 #[tauri::command]
-fn set_wayland_global_shortcut(_shortcut: Option<String>) -> Result<(), String> {
+fn set_wayland_global_shortcut(_shortcut: Option<String>) -> Result<Option<String>, String> {
     Err("o portal de atalhos Wayland só está disponível no Linux".into())
 }
 
@@ -738,6 +843,7 @@ pub fn run() {
             core_request,
             updater_is_configured,
             is_wayland_session,
+            configure_native_hotkey,
             set_wayland_global_shortcut,
             updater_target,
             #[cfg(target_os = "linux")]
@@ -749,7 +855,7 @@ pub fn run() {
             restart_app
         ])
         .setup(|app| {
-            let core = Arc::new(CoreState::launch());
+            let core = Arc::new(CoreState::new());
             // The Windows updater clears Tauri resources before exiting to run NSIS.
             app.resources_table().add(CoreShutdown(Arc::clone(&core)));
             app.manage(core);

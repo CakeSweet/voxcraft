@@ -216,6 +216,7 @@
                             <span data-i18n="hold_key">Segurar tecla</span>
                         </label>
                     </div>
+                    <p id="hotkey-status" class="field-label" role="status" hidden></p>
                     <div class="hotkey-row">
                         <span class="field-label" data-i18n="key_label">Atalho</span>
                         <button id="hotkey-key" class="button hotkey-key" type="button">F9</button>
@@ -245,6 +246,23 @@
                             data-i18n="close">Fechar</button>
                 </div>
             </section>
+        </dialog>
+
+        <dialog id="message-dialog" class="dialog message-dialog custom-scrollbar"
+                aria-labelledby="message-title" aria-describedby="message-text">
+            <form id="message-form" class="dialog-card" novalidate>
+                <header class="dialog-header">
+                    <h2 id="message-title"></h2>
+                </header>
+                <p id="message-text" class="message-text"></p>
+                <input id="message-input" class="message-input" type="text"
+                       aria-labelledby="message-text" autocomplete="off" hidden />
+                <div class="dialog-actions">
+                    <button id="message-cancel" class="button" type="button"
+                            data-close-dialog="message-dialog" data-i18n="cancel">Cancelar</button>
+                    <button id="message-accept" class="button button-primary" type="submit">OK</button>
+                </div>
+            </form>
         </dialog>
     </div>
 
