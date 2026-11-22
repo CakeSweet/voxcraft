@@ -113,10 +113,10 @@ _VIRTUAL_OUTPUT_MARKERS = (
     "blackhole",
     "soundflower",
 )
-_VOXCRAFT_VIRTUAL_SINK_NAME = "voxcraft_virtual_output"
-_VOXCRAFT_VIRTUAL_SINK_DESCRIPTION = "VoxCraft_Virtual_Output"
-_VOXCRAFT_MICROPHONE_SOURCE_NAME = "voxcraft_output"
-_VOXCRAFT_MICROPHONE_DESCRIPTION = "voxcraft-output"
+_CABLE_INPUT_SINK_NAME = "cable_input"
+_CABLE_INPUT_SINK_DESCRIPTION = "CABLE Input"
+_CABLE_OUTPUT_SOURCE_NAME = "cable_output"
+_CABLE_OUTPUT_SOURCE_DESCRIPTION = "CABLE Output"
 
 _GENERIC_DEV_WORDS = {
     "microfone",
@@ -150,14 +150,14 @@ def _is_virtual_output_name(name: str) -> bool:
     return any(marker in normalized for marker in _VIRTUAL_OUTPUT_MARKERS)
 
 
-def _is_voxcraft_virtual_sink_name(name: str) -> bool:
+def _is_cable_input_name(name: str) -> bool:
     normalized = "".join(ch for ch in name.casefold() if ch.isalnum())
-    return normalized == "voxcraftvirtualoutput"
+    return normalized == "cableinput"
 
 
-def _is_voxcraft_virtual_microphone_name(name: str) -> bool:
+def _is_cable_output_name(name: str) -> bool:
     normalized = "".join(ch for ch in name.casefold() if ch.isalnum())
-    return normalized == "voxcraftoutput"
+    return normalized == "cableoutput"
 
 
 def _short_hostapi(api_name: str) -> str:
@@ -289,7 +289,7 @@ def _desktop_devices(
         devices = [
             device
             for device in devices
-            if not _is_voxcraft_virtual_microphone_name(device.name)
+            if not _is_cable_output_name(device.name)
         ]
     endpoints = _linux_sound_endpoints("sources" if is_input else "sinks")
     if endpoints is None:
@@ -305,7 +305,7 @@ def _desktop_devices(
         name = endpoint["name"]
         if is_input and (
             name.endswith(".monitor")
-            or _is_voxcraft_virtual_microphone_name(name)
+            or _is_cable_output_name(name)
         ):
             continue
         description = endpoint.get("description") or name
@@ -392,7 +392,7 @@ class AudioRouter:
             if int(device.get("max_output_channels", 0)) <= 0:
                 return False
             if sys.platform.startswith("linux"):
-                return _is_voxcraft_virtual_sink_name(name)
+                return _is_cable_input_name(name)
             return _is_virtual_output_name(name)
         except (IndexError, TypeError, ValueError, sd.PortAudioError):
             return False
@@ -426,7 +426,7 @@ class AudioRouter:
             device
             for device in outputs
             if device.is_virtual_output
-            and _is_voxcraft_virtual_sink_name(device.name)
+            and _is_cable_input_name(device.name)
         ]
         created = False
         if not virtual_outputs:
@@ -445,8 +445,8 @@ class AudioRouter:
                 }
 
             server_has_voxcraft_sink = any(
-                _is_voxcraft_virtual_sink_name(str(endpoint.get("name", "")))
-                or _is_voxcraft_virtual_sink_name(
+                _is_cable_input_name(str(endpoint.get("name", "")))
+                or _is_cable_input_name(
                     str(endpoint.get("description", ""))
                 )
                 for endpoint in sink_endpoints
@@ -470,8 +470,11 @@ class AudioRouter:
                     [
                         "load-module",
                         "module-null-sink",
-                        f"sink_name={_VOXCRAFT_VIRTUAL_SINK_NAME}",
-                        f"sink_properties=device.description={_VOXCRAFT_VIRTUAL_SINK_DESCRIPTION}",
+                        f"sink_name={_CABLE_INPUT_SINK_NAME}",
+                        # The module argument and the property value are parsed separately.
+                        (
+                            f'''sink_properties="device.description='{_CABLE_INPUT_SINK_DESCRIPTION}'"'''
+                        ),
                     ],
                     timeout=5,
                 )
@@ -503,7 +506,7 @@ class AudioRouter:
                 device
                 for device in outputs
                 if device.is_virtual_output
-                and _is_voxcraft_virtual_sink_name(device.name)
+                and _is_cable_input_name(device.name)
             ]
 
         if not virtual_outputs:
@@ -529,7 +532,7 @@ class AudioRouter:
                 "canRetry": True,
                 "message": (
                     "Não foi possível localizar a saída virtual no PipeWire/PulseAudio "
-                    "para criar o microfone voxcraft-output."
+                    "para criar o microfone CABLE Output."
                 ),
             }
 
@@ -561,12 +564,12 @@ class AudioRouter:
                 "canRetry": True,
                 "message": (
                     "A saída virtual não disponibilizou uma fonte de captura para "
-                    "o microfone voxcraft-output."
+                    "o microfone CABLE Output."
                 ),
             }
 
         microphone_exists = any(
-            endpoint["name"] == _VOXCRAFT_MICROPHONE_SOURCE_NAME
+            endpoint["name"] == _CABLE_OUTPUT_SOURCE_NAME
             for endpoint in source_endpoints
         )
         microphone_created = False
@@ -576,11 +579,10 @@ class AudioRouter:
                     [
                         "load-module",
                         "module-remap-source",
-                        f"source_name={_VOXCRAFT_MICROPHONE_SOURCE_NAME}",
+                        f"source_name={_CABLE_OUTPUT_SOURCE_NAME}",
                         f"master={monitor_source}",
                         (
-                            "source_properties=device.description="
-                            f'"{_VOXCRAFT_MICROPHONE_DESCRIPTION}"'
+                            f'''source_properties="device.description='{_CABLE_OUTPUT_SOURCE_DESCRIPTION}'"'''
                         ),
                     ],
                     timeout=5,
@@ -604,14 +606,14 @@ class AudioRouter:
                     "microphoneCreated": False,
                     "canRetry": True,
                     "message": (
-                        "Não foi possível criar o microfone voxcraft-output"
+                        "Não foi possível criar o microfone CABLE Output"
                         + (f": {detail}" if detail else ".")
                     ),
                 }
 
             source_endpoints = _linux_sound_endpoints("sources") or []
             microphone_exists = any(
-                endpoint["name"] == _VOXCRAFT_MICROPHONE_SOURCE_NAME
+                endpoint["name"] == _CABLE_OUTPUT_SOURCE_NAME
                 for endpoint in source_endpoints
             )
         microphone_available = microphone_exists
@@ -623,7 +625,7 @@ class AudioRouter:
             "microphoneCreated": microphone_created,
             "canRetry": False,
             "message": None if microphone_available else (
-                "O microfone voxcraft-output não apareceu no PipeWire/PulseAudio."
+                "O microfone CABLE Output não apareceu no PipeWire/PulseAudio."
             ),
         }
 
@@ -739,6 +741,40 @@ class AudioRouter:
             valid.append((def_sr, ch_opts[0]))
         return valid
 
+    @staticmethod
+    def _stream_attempt_modes(blocksize: int) -> list[tuple[int, str]]:
+        modes = [(0, "low"), (0, "high")]
+        if blocksize > 0:
+            modes.insert(0, (blocksize, "low"))
+        return modes
+
+    def _finish_stream_start(
+        self,
+        in_idx: int,
+        out_idx: int,
+        monitor_idx: int | None,
+        monitor_sr: int,
+        blocksize: int,
+        message: str,
+    ) -> tuple[bool, str]:
+        self.running = True
+        self.last_used_in_idx = in_idx
+        self.last_used_out_idx = out_idx
+        if self.monitor_enabled and monitor_idx == out_idx:
+            self.monitor_enabled = False
+            self._mon_fifo.clear()
+        elif self.monitor_enabled and monitor_idx is not None:
+            error = self._start_monitor(monitor_idx, monitor_sr, blocksize)
+            if error:
+                self.monitor_enabled = False
+                self._mon_fifo.clear()
+                message += f" | Monitor off: {error}"
+        return True, message
+
+    @staticmethod
+    def _write_output(outdata: np.ndarray, mono: np.ndarray) -> None:
+        outdata[:] = mono[:, None]
+
     def _start_pair(
         self,
         in_idx: int,
@@ -765,11 +801,7 @@ class AudioRouter:
         out_ch_opts = [2, 1] if int(out_info["max_output_channels"]) >= 2 else [1]
 
         # Tenta latência baixa com bloco pedido, depois bloco automático, depois latência alta (evita -9999 em USB/MME/WDM-KS)
-        attempt_modes: list[tuple[int, str]] = []
-        if blocksize > 0:
-            attempt_modes.append((blocksize, "low"))
-        attempt_modes.append((0, "low"))
-        attempt_modes.append((0, "high"))
+        attempt_modes = self._stream_attempt_modes(blocksize)
 
         in_ok_cache: dict[tuple[int, int], bool] = {}
         out_ok_cache: dict[tuple[int, int], bool] = {}
@@ -817,10 +849,7 @@ class AudioRouter:
                             def duplex_cb(indata, outdata, frames, time_info, status, _sr=sr):
                                 mono = indata[:, 0] if indata.ndim > 1 else indata
                                 processed = self.dsp.process(mono)
-                                if outdata.shape[1] == 1:
-                                    outdata[:, 0] = processed
-                                else:
-                                    outdata[:] = processed[:, None]
+                                self._write_output(outdata, processed)
                                 if self.monitor_enabled:
                                     mon_chunk = _resample_linear(processed, _sr, self.active_mon_sr)
                                     self._mon_fifo.push(mon_chunk)
@@ -835,22 +864,12 @@ class AudioRouter:
                                 callback=duplex_cb,
                             )
                             self._stream.start()
-                            self.running = True
-                            self.last_used_in_idx = in_idx
-                            self.last_used_out_idx = out_idx
                             eff_blk = blk if blk > 0 else blocksize
                             prefix = f"Ativo ({api_note}):" if api_note else "Ativo:"
                             msg = f"{prefix} {sr} Hz | Bloco {eff_blk} (~{eff_blk * 1000 / sr:.1f} ms)"
-                            if self.monitor_enabled and monitor_idx is not None and monitor_idx != out_idx:
-                                mon_err = self._start_monitor(monitor_idx, sr, blk)
-                                if mon_err:
-                                    self.monitor_enabled = False
-                                    self._mon_fifo.clear()
-                                    msg += f" | Monitor off: {mon_err}"
-                            elif self.monitor_enabled and monitor_idx == out_idx:
-                                self.monitor_enabled = False
-                                self._mon_fifo.clear()
-                            return True, msg
+                            return self._finish_stream_start(
+                                in_idx, out_idx, monitor_idx, sr, blk, msg
+                            )
                         except Exception as e:
                             last_err = str(e)
                             if self._stream is not None:
@@ -903,10 +922,7 @@ class AudioRouter:
 
                     def out_cb(outdata, frames, time_info, status):
                         out_buf = self._bridge_fifo.pop(frames)
-                        if outdata.shape[1] == 1:
-                            outdata[:, 0] = out_buf
-                        else:
-                            outdata[:] = out_buf[:, None]
+                        self._write_output(outdata, out_buf)
 
                     self._in_stream = sd.InputStream(
                         device=in_idx,
@@ -928,23 +944,13 @@ class AudioRouter:
                     )
                     self._in_stream.start()
                     self._out_stream.start()
-                    self.running = True
-                    self.last_used_in_idx = in_idx
-                    self.last_used_out_idx = out_idx
                     sr_txt = f"{in_sr} Hz" if in_sr == out_sr else f"{in_sr}→{out_sr} Hz"
                     eff_blk = blk if blk > 0 else blocksize
                     prefix = f"Ativo (Ponte • {api_note}):" if api_note else "Ativo (Ponte):"
                     msg = f"{prefix} {sr_txt} | Bloco {eff_blk}"
-                    if self.monitor_enabled and monitor_idx is not None and monitor_idx != out_idx:
-                        mon_err = self._start_monitor(monitor_idx, out_sr, blk)
-                        if mon_err:
-                            self.monitor_enabled = False
-                            self._mon_fifo.clear()
-                            msg += f" | Monitor off: {mon_err}"
-                    elif self.monitor_enabled and monitor_idx == out_idx:
-                        self.monitor_enabled = False
-                        self._mon_fifo.clear()
-                    return True, msg
+                    return self._finish_stream_start(
+                        in_idx, out_idx, monitor_idx, out_sr, blk, msg
+                    )
                 except Exception as e:
                     last_err = str(e)
                     self._stop_unlocked()
@@ -1027,7 +1033,7 @@ class AudioRouter:
     def _start_monitor(self, monitor_idx: int, preferred_sr: int, blocksize: int) -> str | None:
         cand_indices = self._equivalent_device_indices(monitor_idx, is_input=False)
         last_err = ""
-        blk_opts = [(blocksize, "low"), (0, "low"), (0, "high")] if blocksize > 0 else [(0, "low"), (0, "high")]
+        blk_opts = self._stream_attempt_modes(blocksize)
 
         for m_idx in cand_indices[:4]:
             try:
@@ -1047,10 +1053,7 @@ class AudioRouter:
 
                         def mon_cb(outdata, frames, time_info, status):
                             chunk = self._mon_fifo.pop(frames)
-                            if outdata.shape[1] == 1:
-                                outdata[:, 0] = chunk
-                            else:
-                                outdata[:] = chunk[:, None]
+                            self._write_output(outdata, chunk)
 
                         self._mon_stream = sd.OutputStream(
                             device=m_idx,

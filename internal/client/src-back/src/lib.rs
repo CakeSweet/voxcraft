@@ -8,13 +8,12 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, State,
-};
+use tauri::{Emitter, Manager, State};
 #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+mod tray;
+mod updater;
 
 struct CoreProcess {
     child: Child,
@@ -259,6 +258,8 @@ struct PortalShortcutState {
 struct PortalShortcutTask {
     cancel: tokio::sync::oneshot::Sender<()>,
     join: tauri::async_runtime::JoinHandle<()>,
+    portal: Arc<ashpd::desktop::global_shortcuts::GlobalShortcuts>,
+    session: Arc<ashpd::desktop::Session<ashpd::desktop::global_shortcuts::GlobalShortcuts>>,
 }
 
 #[cfg(target_os = "linux")]
@@ -344,11 +345,6 @@ async fn core_request(
     })
     .await
     .map_err(|error| error.to_string())?
-}
-
-#[tauri::command]
-fn updater_is_configured() -> bool {
-    option_env!("UPDATER_PUBLIC_KEY").is_some_and(|key| !key.trim().is_empty())
 }
 
 #[tauri::command]
@@ -558,6 +554,10 @@ async fn set_wayland_global_shortcut(
         .receive_deactivated()
         .await
         .map_err(|error| format!("não foi possível ouvir liberações do portal: {error}"))?;
+    let mut shortcuts_changed = portal
+        .receive_shortcuts_changed()
+        .await
+        .map_err(|error| format!("não foi possível ouvir mudanças de atalho do portal: {error}"))?;
 
     let definition = NewShortcut::new(
         SHORTCUT_ID,
@@ -589,8 +589,11 @@ async fn set_wayland_global_shortcut(
 
     let (cancel, mut cancel_rx) = tokio::sync::oneshot::channel();
     let event_app = app.clone();
+    let portal = Arc::new(portal);
+    let session = Arc::new(session);
+    let event_session = Arc::clone(&session);
     let join = tauri::async_runtime::spawn(async move {
-        let _portal = portal;
+        let session = event_session;
         let Ok(mut closed) = session.receive_closed().await else {
             emit_hotkey(&event_app, "Unavailable");
             let _ = session.close().await;
@@ -615,6 +618,17 @@ async fn set_wayland_global_shortcut(
                     Some(_) => {}
                     None => break false,
                 },
+                event = shortcuts_changed.next() => match event {
+                    Some(event) => {
+                        if let Some(bound) = event.shortcuts().iter().find(|bound| bound.id() == SHORTCUT_ID) {
+                            let _ = event_app.emit(
+                                "voxcraft-global-hotkey",
+                                json!({ "description": bound.trigger_description() }),
+                            );
+                        }
+                    }
+                    None => break false,
+                },
             }
         };
         if !cancelled {
@@ -627,7 +641,12 @@ async fn set_wayland_global_shortcut(
         .task
         .lock()
         .map_err(|_| "estado do atalho global indisponível".to_string())? =
-        Some(PortalShortcutTask { cancel, join });
+        Some(PortalShortcutTask {
+            cancel,
+            join,
+            portal,
+            session,
+        });
     Ok(Some(description))
 }
 
@@ -637,195 +656,28 @@ fn set_wayland_global_shortcut(_shortcut: Option<String>) -> Result<Option<Strin
     Err("o portal de atalhos Wayland só está disponível no Linux".into())
 }
 
-#[tauri::command]
-fn updater_target() -> Option<String> {
-    let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
-
-    #[cfg(target_os = "linux")]
-    {
-        use tauri::utils::{config::BundleType, platform::bundle_type};
-        let format = match bundle_type()? {
-            BundleType::Deb => "deb",
-            BundleType::Rpm => "rpm",
-            _ => return None,
-        };
-        Some(format!("{platform}-{format}"))
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        Some(platform)
-    }
-}
-
-#[cfg(target_os = "linux")]
-const DNF: &str = "/usr/bin/dnf";
-#[cfg(target_os = "linux")]
-const PKEXEC: &str = "/usr/bin/pkexec";
-
-#[cfg(target_os = "linux")]
-#[derive(Default)]
-struct RpmUpdateState(tokio::sync::Mutex<Option<(String, Arc<Vec<u8>>)>>);
-
 #[cfg(target_os = "linux")]
 #[tauri::command]
-fn rpm_update_uses_dnf() -> bool {
-    use tauri::utils::{config::BundleType, platform::bundle_type};
-    matches!(bundle_type(), Some(BundleType::Rpm)) && std::path::Path::new(DNF).is_file()
-}
-
-#[cfg(target_os = "linux")]
-#[tauri::command]
-async fn download_rpm_update(
-    app: tauri::AppHandle,
-    state: State<'_, RpmUpdateState>,
-    version: String,
-    progress: tauri::ipc::Channel<u64>,
+async fn configure_wayland_global_shortcut(
+    state: State<'_, PortalShortcutState>,
 ) -> Result<(), String> {
-    use tauri_plugin_updater::UpdaterExt;
-
-    if !updater_is_configured() || !rpm_update_uses_dnf() {
-        return Err("Atualização RPM via DNF não está disponível.".into());
-    }
-    let mut staged = state.0.lock().await;
-    *staged = None;
-    let target = updater_target().ok_or("Formato de atualização indisponível.")?;
-    let update = app
-        .updater_builder()
-        .target(target)
-        .build()
-        .map_err(|error| error.to_string())?
-        .check()
-        .await
-        .map_err(|error| error.to_string())?
-        .filter(|update| update.version == version)
-        .ok_or("A versão disponível mudou. Verifique novamente.")?;
-
-    let mut downloaded = 0u64;
-    let mut last_percent = 0;
-    // The plugin verifies the release signature before returning the bytes.
-    let bytes = update
-        .download(
-            |chunk, total| {
-                downloaded += chunk as u64;
-                if let Some(total) = total.filter(|&total| total > 0) {
-                    let percent = (downloaded.saturating_mul(100) / total).min(100);
-                    if percent != last_percent {
-                        let _ = progress.send(percent);
-                        last_percent = percent;
-                    }
-                }
-            },
-            || {},
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-    if !bytes.starts_with(&[0xed, 0xab, 0xee, 0xdb]) {
-        return Err("O arquivo assinado não é um pacote RPM.".into());
-    }
-    *staged = Some((version, Arc::new(bytes)));
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-#[tauri::command]
-async fn install_rpm_update(
-    state: State<'_, RpmUpdateState>,
-    version: String,
-) -> Result<(), String> {
-    if !rpm_update_uses_dnf() {
-        return Err("Atualização RPM via DNF não está disponível.".into());
-    }
-    let mut staged = state.0.lock().await;
-    let (_, bytes) = staged
+    let (portal, session) = state
+        .task
+        .lock()
+        .map_err(|_| "estado do atalho global indisponível".to_string())?
         .as_ref()
-        .filter(|(downloaded_version, _)| downloaded_version == &version)
-        .ok_or("Baixe a atualização antes de instalar.")?;
-    let bytes = Arc::clone(bytes);
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
-        let package = directory.path().join("voxcraft-update.rpm");
-        std::fs::write(&package, bytes.as_slice()).map_err(|error| error.to_string())?;
-        let output = Command::new(PKEXEC)
-            .arg(DNF)
-            .args(["install", "-y"])
-            .arg(package)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|error| format!("Não foi possível iniciar o instalador DNF: {error}"))?;
-        if output.status.success() {
-            return Ok(());
-        }
-        if output.status.code() == Some(126) {
-            return Err("Autorização do sistema cancelada.".into());
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = if stderr.trim().is_empty() {
-            stdout.trim()
-        } else {
-            stderr.trim()
-        };
-        Err(format!(
-            "O instalador DNF falhou ({}): {}",
-            output.status, detail
-        ))
-    })
-    .await
-    .map_err(|error| error.to_string())??;
-    *staged = None;
-    Ok(())
+        .map(|task| (Arc::clone(&task.portal), Arc::clone(&task.session)))
+        .ok_or_else(|| "não há atalho global vinculado ao portal".to_string())?;
+    portal
+        .configure_shortcuts(&session, None, Default::default())
+        .await
+        .map_err(|error| format!("não foi possível abrir a configuração de atalhos: {error}"))
 }
 
+#[cfg(not(target_os = "linux"))]
 #[tauri::command]
-fn restart_app(app: tauri::AppHandle) {
-    app.restart();
-}
-
-fn show_main_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-}
-
-fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Abrir", true, None::<&str>)?;
-    let separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &separator, &quit])?;
-    let icon = app.default_window_icon().cloned().ok_or_else(|| {
-        tauri::Error::InvalidIcon(std::io::Error::other(
-            "ícone padrão do VoxCraft não configurado",
-        ))
-    })?;
-
-    TrayIconBuilder::with_id("voxcraft-tray")
-        .icon(icon)
-        .tooltip("VoxCraft Studio")
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "show" => show_main_window(app),
-            "quit" => app.exit(0),
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if matches!(
-                event,
-                TrayIconEvent::Click {
-                    button: MouseButton::Left,
-                    button_state: MouseButtonState::Up,
-                    ..
-                }
-            ) {
-                show_main_window(tray.app_handle());
-            }
-        })
-        .build(app)?;
-
-    Ok(())
+fn configure_wayland_global_shortcut() -> Result<(), String> {
+    Err("o portal de atalhos Wayland só está disponível no Linux".into())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -841,18 +693,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
             core_request,
-            updater_is_configured,
+            updater::updater_is_configured,
             is_wayland_session,
             configure_native_hotkey,
             set_wayland_global_shortcut,
-            updater_target,
-            #[cfg(target_os = "linux")]
-            rpm_update_uses_dnf,
-            #[cfg(target_os = "linux")]
-            download_rpm_update,
-            #[cfg(target_os = "linux")]
-            install_rpm_update,
-            restart_app
+            configure_wayland_global_shortcut,
+            updater::updater_target,
+            updater::restart_app
         ])
         .setup(|app| {
             let core = Arc::new(CoreState::new());
@@ -861,22 +708,11 @@ pub fn run() {
             app.manage(core);
             #[cfg(target_os = "linux")]
             app.manage(PortalShortcutState::default());
-            #[cfg(target_os = "linux")]
-            app.manage(RpmUpdateState::default());
-            setup_tray(app)?;
+            tray::setup(app)?;
             Ok(())
         });
 
-    let builder = match option_env!("UPDATER_PUBLIC_KEY") {
-        Some(public_key) if !public_key.trim().is_empty() => builder.plugin(
-            tauri_plugin_updater::Builder::new()
-                .pubkey(public_key)
-                .build(),
-        ),
-        _ => builder,
-    };
-
-    let app = builder
+    let app = updater::configure(builder)
         .build(tauri::generate_context!())
         .expect("erro ao iniciar VoxCraft Studio");
     app.run(|app_handle, event| {

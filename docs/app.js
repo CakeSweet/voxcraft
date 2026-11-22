@@ -1,6 +1,6 @@
 (() => {
   const REPO = "CakeSweet/voxcraft";
-  const DEFAULT_VERSION = "2.3.4";
+  const DEFAULT_VERSION = "2.3.5";
 
   const PRESET_GROUPS = [
     {
@@ -68,14 +68,14 @@
       pipe_title: "Projetado para voz limpa, baixa latência e controle total no desktop.",
       feat_1_title: "Cadeia DSP em tempo real sem dependências na nuvem",
       feat_1_desc:
-        "Processamento em bloco contínuo com NumPy e SciPy: Noise Gate opcional, Compressor RMS, Pitch Shifter sem perda de cadência, Frequency Shifter, Vocoder com portadoras sintetizadas, Equalizador de 5 bandas com filtros HPF/LPF, Chorus/Flanger, Phaser multi-estágio, Auto-Wah, Ring Modulator, Distortion/Bitcrusher, Echo e Reverb Schroeder.",
+        "Processamento em blocos com NumPy e SciPy: Noise Gate, compressor RMS, Pitch Shifter, Frequency Shifter, Vocoder, equalizador de 5 bandas com filtros HPF/LPF, Chorus/Flanger, Phaser, Auto-Wah, Ring Modulator, distorção, eco e reverb.",
       feat_1_meta: "Resampling automático entre dispositivos",
       feat_2_title: "Atalho Global Instantâneo",
       feat_2_desc:
-        "Alterne entre voz modificada e voz natural com uma tecla ou botão lateral do mouse (como F9) no modo Alternar ou Segurar.",
+        "Alterne entre voz com efeitos e Voz Original com F9 por padrão, no modo Alternar ou Segurar. Funciona na bandeja quando registrado como global. No Wayland, o registro depende do portal do ambiente gráfico.",
       feat_3_title: "Roteamento para Discord, OBS e Jogos",
       feat_3_desc:
-        "Envie sua voz processada para o VB-Cable no Windows ou use o sink virtual que o app configura no PipeWire/PulseAudio no Linux, sem alterar a saída padrão do sistema.",
+        "No Discord, OBS ou jogo, selecione CABLE Output no Windows. No Linux, selecione o microfone virtual criado pelo VoxCraft: CABLE Output (voxcraft-output na v2.3.4).",
       presets_kicker: "02. Biblioteca Nativa",
       presets_title: "24 presets prontos de fábrica e vozes personalizadas ilimitadas.",
       dl_kicker: "03. Instalação e Releases",
@@ -111,14 +111,14 @@
       pipe_title: "Engineered for clean voice routing, low latency, and desktop reliability.",
       feat_1_title: "Real-time DSP chain with zero cloud dependencies",
       feat_1_desc:
-        "Continuous block processing via NumPy and SciPy: optional Noise Gate, RMS Compressor, Pitch Shifter, Frequency Shifter, synthesized-carrier Vocoder, 5-Band EQ with HPF/LPF, Chorus/Flanger, multi-stage Phaser, Auto-Wah, Ring Modulator, Distortion/Bitcrusher, Echo, and Schroeder Reverb.",
+        "Block processing with NumPy and SciPy: noise gate, RMS compressor, pitch shifter, frequency shifter, vocoder, 5-band EQ with HPF/LPF, chorus/flanger, phaser, auto-wah, ring modulator, distortion, echo, and reverb.",
       feat_1_meta: "Automatic sample-rate resampling",
       feat_2_title: "Instant Global Hotkey",
       feat_2_desc:
-        "Switch between modulated and natural voice with a key or side mouse button (such as F9) in Toggle or Hold mode.",
+        "Switch between processed and original voice with F9 by default, in Toggle or Hold mode. The shortcut works from the tray when registered globally. On Wayland, registration depends on the desktop portal.",
       feat_3_title: "Routing for Discord, OBS & Games",
       feat_3_desc:
-        "Route processed voice into VB-Cable on Windows or use the virtual sink VoxCraft configures through PipeWire/PulseAudio on Linux, without changing the system's default output.",
+        "In Discord, OBS, or your game, select CABLE Output on Windows. On Linux, select the virtual microphone created by VoxCraft: CABLE Output (voxcraft-output in v2.3.4).",
       presets_kicker: "02. Built-in Library",
       presets_title: "24 factory voice presets plus unlimited custom profiles.",
       dl_kicker: "03. Releases & Installation",
@@ -154,14 +154,14 @@
       pipe_title: "Diseñado para voz limpia, baja latencia y estabilidad de escritorio.",
       feat_1_title: "Cadena DSP en tiempo real sin nube",
       feat_1_desc:
-        "Procesamiento por bloques con NumPy y SciPy: Noise Gate opcional, Compresor RMS, Pitch Shifter, Frequency Shifter, Vocoder sintetizado, Ecualizador de 5 bandas con HPF/LPF, Chorus/Flanger, Phaser, Auto-Wah, Ring Modulator, Distortion/Bitcrusher, Echo y Reverb Schroeder.",
+        "Procesamiento por bloques con NumPy y SciPy: puerta de ruido, compresor RMS, Pitch Shifter, Frequency Shifter, vocoder, ecualizador de 5 bandas con HPF/LPF, Chorus/Flanger, Phaser, Auto-Wah, Ring Modulator, distorsión, eco y reverberación.",
       feat_1_meta: "Resampling automático entre dispositivos",
       feat_2_title: "Atajo Global Instantáneo",
       feat_2_desc:
-        "Alterna entre voz con efecto y voz natural con una tecla o botón lateral del ratón (como F9) en modo Alternar o Mantener.",
+        "Alterna entre voz con efectos y voz original con F9 de forma predeterminada, en modo Alternar o Mantener. El atajo funciona desde la bandeja si está registrado como global. En Wayland, el registro depende del portal del escritorio.",
       feat_3_title: "Listo para Discord, OBS y Juegos",
       feat_3_desc:
-        "Envía la voz procesada a VB-Cable en Windows o usa el sink virtual que VoxCraft configura mediante PipeWire/PulseAudio en Linux, sin cambiar la salida predeterminada del sistema.",
+        "En Discord, OBS o tu juego, selecciona CABLE Output en Windows. En Linux, selecciona el micrófono virtual creado por VoxCraft: CABLE Output (voxcraft-output en v2.3.4).",
       presets_kicker: "02. Biblioteca Nativa",
       presets_title: "24 presets integrados y voces personalizadas ilimitadas.",
       dl_kicker: "03. Instalación y Releases",
@@ -305,9 +305,9 @@
           es: `${tag} · Windows 10 / 11 (x64)`,
         },
         desc: {
-          pt: "No Windows, o instalador instala o VB-Audio Virtual Cable obrigatório após aprovação do administrador. No Discord, selecione CABLE Output como microfone.",
-          en: "On Windows, the installer installs the required VB-Audio Virtual Cable after administrator approval. In Discord, select CABLE Output as your microphone.",
-          es: "En Windows, el instalador instala el VB-Audio Virtual Cable obligatorio tras la aprobación del administrador. En Discord, selecciona CABLE Output como micrófono.",
+          pt: "Execute o instalador. Se o VB-Audio Virtual Cable não estiver presente, o instalador o baixa e pede autorização de administrador. No Discord, selecione CABLE Output como microfone.",
+          en: "Run the installer. If VB-Audio Virtual Cable is missing, the installer downloads it and asks for administrator approval. In Discord, select CABLE Output as your microphone.",
+          es: "Ejecuta el instalador. Si falta VB-Audio Virtual Cable, el instalador lo descarga y solicita autorización de administrador. En Discord, selecciona CABLE Output como micrófono.",
         },
         buttons: [
           {
@@ -320,7 +320,6 @@
             asset: resolveAssetUrl("VoxCraftStudio_Setup", `VoxCraftStudio_Setup_v${v}.exe`),
           },
         ],
-        cmd: "winget install VB-Audio.VBCABLE  # dependência obrigatória do VoxCraft no Windows",
       },
       deb: {
         title: {
@@ -353,9 +352,9 @@
       },
       rpm: {
         title: {
-          pt: "Pacote Linux Fedora / RHEL / openSUSE (.rpm)",
-          en: "Fedora / RHEL / openSUSE Package (.rpm)",
-          es: "Paquete Linux Fedora / RHEL / openSUSE (.rpm)",
+          pt: "Pacote Linux Fedora / RHEL (.rpm)",
+          en: "Fedora / RHEL Package (.rpm)",
+          es: "Paquete Linux Fedora / RHEL (.rpm)",
         },
         meta: {
           pt: `${tag} · x86_64 · portaudio`,
@@ -415,7 +414,8 @@
     headingEl.textContent = cfg.title[state.lang] || cfg.title.pt;
     metaEl.textContent = cfg.meta[state.lang] || cfg.meta.pt;
     descEl.textContent = cfg.desc[state.lang] || cfg.desc.pt;
-    cmdCodeEl.textContent = cfg.cmd;
+    $("#dlCmdWrap").hidden = !cfg.cmd;
+    cmdCodeEl.textContent = cfg.cmd ?? "";
 
     cfg.buttons.forEach((b) => {
       const a = document.createElement("a");

@@ -7,18 +7,18 @@ from internal.core.src.audio_router import AudioDeviceItem, AudioRouter
 
 
 class VirtualOutputDetectionTests(unittest.TestCase):
-    def test_recognizes_cable_and_voxcraft_virtual_output_names(self):
+    def test_recognizes_cable_and_virtual_output_names(self):
         self.assertTrue(audio_router._is_virtual_output_name(
             "CABLE Input (VB-Audio Virtual Cable)"
         ))
-        self.assertTrue(audio_router._is_virtual_output_name("VoxCraft_Virtual_Output"))
+        self.assertTrue(audio_router._is_virtual_output_name("Generic Virtual Output"))
 
     def test_does_not_classify_physical_speakers_as_virtual(self):
         self.assertFalse(audio_router._is_virtual_output_name(
             "Speakers (Realtek(R) Audio)"
         ))
 
-    def test_linux_virtual_microphone_uses_only_the_voxcraft_sink(self):
+    def test_linux_virtual_microphone_uses_only_cable_input(self):
         with (
             patch.object(audio_router.sys, "platform", "linux"),
             patch.object(
@@ -38,7 +38,7 @@ class VirtualOutputDetectionTests(unittest.TestCase):
                 audio_router.sd,
                 "query_devices",
                 return_value={
-                    "name": "VoxCraft_Virtual_Output",
+                    "name": "CABLE Input",
                     "max_output_channels": 2,
                 },
             ),
@@ -77,13 +77,13 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
 
     def test_reuses_existing_output_and_creates_named_microphone_source(self):
         virtual_output = AudioDeviceItem(
-            4, "VoxCraft_Virtual_Output", "PulseAudio", 0, 2, 48000
+            4, "CABLE Input", "PulseAudio", 0, 2, 48000
         )
         source_lists = iter([
-            [{"name": "voxcraft_virtual_output.monitor"}],
+            [{"name": "cable_input.monitor"}],
             [
-                {"name": "voxcraft_virtual_output.monitor"},
-                {"name": "voxcraft_output", "description": "voxcraft-output"},
+                {"name": "cable_input.monitor"},
+                {"name": "cable_output", "description": "CABLE Output"},
             ],
         ])
         load_result = subprocess.CompletedProcess(
@@ -102,8 +102,8 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
                 "_linux_sound_endpoints",
                 side_effect=lambda kind: (
                     [{
-                        "name": "voxcraft_virtual_output",
-                        "description": "VoxCraft_Virtual_Output",
+                        "name": "cable_input",
+                        "description": "CABLE Input",
                     }]
                     if kind == "sinks"
                     else next(source_lists)
@@ -125,16 +125,16 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
             [
                 "load-module",
                 "module-remap-source",
-                "source_name=voxcraft_output",
-                "master=voxcraft_virtual_output.monitor",
-                'source_properties=device.description="voxcraft-output"',
+                "source_name=cable_output",
+                "master=cable_input.monitor",
+                '''source_properties="device.description='CABLE Output'"''',
             ],
             timeout=5,
         )
 
     def test_creates_named_sink_and_microphone_and_refreshes_devices(self):
         virtual_output = AudioDeviceItem(
-            7, "VoxCraft_Virtual_Output", "PulseAudio", 0, 2, 48000
+            7, "CABLE Input", "PulseAudio", 0, 2, 48000
         )
         sink_load_result = subprocess.CompletedProcess(
             args=["pactl", "load-module"],
@@ -149,10 +149,10 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
             stderr="",
         )
         source_lists = iter([
-            [{"name": "voxcraft_virtual_output.monitor"}],
+            [{"name": "cable_input.monitor"}],
             [
-                {"name": "voxcraft_virtual_output.monitor"},
-                {"name": "voxcraft_output", "description": "voxcraft-output"},
+                {"name": "cable_input.monitor"},
+                {"name": "cable_output", "description": "CABLE Output"},
             ],
         ])
         with (
@@ -169,8 +169,8 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
                     []
                     if kind == "sinks" and self.router._virtual_output_module_id is None
                     else [{
-                        "name": "voxcraft_virtual_output",
-                        "description": "VoxCraft_Virtual_Output",
+                        "name": "cable_input",
+                        "description": "CABLE Input",
                     }]
                     if kind == "sinks"
                     else next(source_lists)
@@ -197,8 +197,8 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
                 [
                     "load-module",
                     "module-null-sink",
-                    "sink_name=voxcraft_virtual_output",
-                    "sink_properties=device.description=VoxCraft_Virtual_Output",
+                    "sink_name=cable_input",
+                    '''sink_properties="device.description='CABLE Input'"''',
                 ],
                 timeout=5,
             ),
@@ -206,9 +206,9 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
                 [
                     "load-module",
                     "module-remap-source",
-                    "source_name=voxcraft_output",
-                    "master=voxcraft_virtual_output.monitor",
-                    'source_properties=device.description="voxcraft-output"',
+                    "source_name=cable_output",
+                    "master=cable_input.monitor",
+                    '''source_properties="device.description='CABLE Output'"''',
                 ],
                 timeout=5,
             ),
@@ -218,8 +218,8 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
         external_output = AudioDeviceItem(
             5, "Other_Virtual_Output", "PulseAudio", 0, 2, 48000
         )
-        voxcraft_output = AudioDeviceItem(
-            7, "VoxCraft_Virtual_Output", "PulseAudio", 0, 2, 48000
+        cable_input = AudioDeviceItem(
+            7, "CABLE Input", "PulseAudio", 0, 2, 48000
         )
         sink_load_result = subprocess.CompletedProcess(
             args=["pactl", "load-module"],
@@ -234,10 +234,10 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
             stderr="",
         )
         source_lists = iter([
-            [{"name": "voxcraft_virtual_output.monitor"}],
+            [{"name": "cable_input.monitor"}],
             [
-                {"name": "voxcraft_virtual_output.monitor"},
-                {"name": "voxcraft_output", "description": "voxcraft-output"},
+                {"name": "cable_input.monitor"},
+                {"name": "cable_output", "description": "CABLE Output"},
             ],
         ])
 
@@ -255,8 +255,8 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
                     "description": "Other_Virtual_Output",
                 },
                 {
-                    "name": "voxcraft_virtual_output",
-                    "description": "VoxCraft_Virtual_Output",
+                    "name": "cable_input",
+                    "description": "CABLE Input",
                 },
             ]
 
@@ -267,7 +267,7 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
                 "refresh_backend",
                 side_effect=[
                     ([], [external_output]),
-                    ([], [external_output, voxcraft_output]),
+                    ([], [external_output, cable_input]),
                 ],
             ),
             patch.object(
@@ -293,9 +293,9 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
                 [
                     "load-module",
                     "module-remap-source",
-                    "source_name=voxcraft_output",
-                    "master=voxcraft_virtual_output.monitor",
-                    'source_properties=device.description="voxcraft-output"',
+                    "source_name=cable_output",
+                    "master=cable_input.monitor",
+                    '''source_properties="device.description='CABLE Output'"''',
                 ],
                 timeout=5,
             ),
@@ -311,7 +311,7 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
                 return_value=[
                     {
                         "name": "custom_sink",
-                        "description": "VoxCraft Virtual Output",
+                        "description": "CABLE Input",
                     }
                 ],
             ),
@@ -326,9 +326,9 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
         self.assertIn("PortAudio", result["message"])
         run_pactl.assert_not_called()
 
-    def test_does_not_expose_own_virtual_microphone_as_voxcraft_input(self):
+    def test_does_not_expose_own_virtual_microphone_as_input(self):
         microphone = AudioDeviceItem(
-            2, "voxcraft-output", "PulseAudio", 1, 0, 48000
+            2, "CABLE Output", "PulseAudio", 1, 0, 48000
         )
         physical = AudioDeviceItem(
             3, "USB Microphone", "PulseAudio", 1, 0, 48000
@@ -339,7 +339,7 @@ class LinuxVirtualOutputSetupTests(unittest.TestCase):
                 audio_router,
                 "_linux_sound_endpoints",
                 return_value=[
-                    {"name": "voxcraft_output", "description": "voxcraft-output"},
+                    {"name": "cable_output", "description": "CABLE Output"},
                     {"name": "usb_microphone", "description": "USB Microphone"},
                 ],
             ),

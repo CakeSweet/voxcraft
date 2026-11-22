@@ -51,7 +51,7 @@
       <div class="container hero-grid">
         <div class="hero-copy">
           <p class="meta-line" id="heroMeta">
-            <span id="releaseVersionText">v2.3.4</span>
+            <span id="releaseVersionText">v2.3.5</span>
             <span aria-hidden="true">&middot;</span>
             <span data-i18n="hero_os">Windows &amp; Linux (.deb / .rpm)</span>
             <span aria-hidden="true">&middot;</span>
@@ -116,7 +116,7 @@
             <span class="feature-index mono">01</span>
             <h3 data-i18n="feat_1_title">Cadeia DSP em tempo real sem dependências na nuvem</h3>
             <p data-i18n="feat_1_desc">
-              Processamento em bloco contínuo com NumPy e SciPy: Noise Gate opcional, Compressor RMS, Pitch Shifter sem perda de cadência, Frequency Shifter, Vocoder com portadoras sintetizadas, Equalizador de 5 bandas com filtros HPF/LPF, Chorus/Flanger, Phaser multi-estágio, Auto-Wah, Ring Modulator, Distortion/Bitcrusher, Echo e Reverb Schroeder.
+              Processamento em blocos com NumPy e SciPy: Noise Gate, compressor RMS, Pitch Shifter, Frequency Shifter, Vocoder, equalizador de 5 bandas com filtros HPF/LPF, Chorus/Flanger, Phaser, Auto-Wah, Ring Modulator, distorção, eco e reverb.
             </p>
             <p class="feature-meta mono">
               <span>Float32</span>
@@ -131,7 +131,7 @@
             <span class="feature-index mono">02</span>
             <h3 data-i18n="feat_2_title">Atalho Global Instantâneo</h3>
             <p data-i18n="feat_2_desc">
-              Alterne entre voz modificada e voz natural com uma tecla ou botão lateral do mouse (como F9) no modo Alternar ou Segurar.
+              Alterne entre voz com efeitos e Voz Original com F9 por padrão, no modo Alternar ou Segurar. Funciona na bandeja quando registrado como global. No Wayland, o registro depende do portal do ambiente gráfico.
             </p>
           </article>
 
@@ -139,7 +139,7 @@
             <span class="feature-index mono">03</span>
             <h3 data-i18n="feat_3_title">Roteamento para Discord, OBS e Jogos</h3>
             <p data-i18n="feat_3_desc">
-              Envie sua voz processada para o VB-Cable no Windows ou use o sink virtual que o app configura no PipeWire/PulseAudio no Linux, sem alterar a saída padrão do sistema.
+              No Discord, OBS ou jogo, selecione CABLE Output no Windows. No Linux, selecione o microfone virtual criado pelo VoxCraft: CABLE Output (voxcraft-output na v2.3.4).
             </p>
           </article>
         </div>
@@ -179,7 +179,7 @@
             <div class="dl-card-head">
               <div>
                 <h3 id="dlHeading">Instalador Windows</h3>
-                <p class="dl-meta mono tabular" id="dlMetaLine">Versão v2.3.4 &middot; Windows 10 / 11 (x64)</p>
+                <p class="dl-meta mono tabular" id="dlMetaLine">Versão v2.3.5 &middot; Windows 10 / 11 (x64)</p>
               </div>
               <a id="dlReleaseTagLink" href="https://github.com/CakeSweet/voxcraft/releases" target="_blank" rel="noopener noreferrer" class="text-link">
                 <span data-i18n="dl_all_releases">Histórico de Releases</span>
@@ -187,12 +187,12 @@
             </div>
 
             <p id="dlDescription" class="dl-desc">
-              No Windows, o instalador instala o VB-Audio Virtual Cable obrigatório após aprovação do administrador. No Discord, selecione CABLE Output como microfone.
+              Execute o instalador. Se o VB-Audio Virtual Cable não estiver presente, o instalador o baixa e pede autorização de administrador. No Discord, selecione CABLE Output como microfone.
             </p>
 
             <div class="dl-actions" id="dlActionButtons"></div>
 
-            <div class="dl-cmd-wrap" id="dlCmdWrap">
+            <div class="dl-cmd-wrap" id="dlCmdWrap" hidden>
               <code id="dlCmdCode" class="mono"></code>
               <button type="button" class="btn btn-secondary btn-sm" id="dlCopyBtn" data-i18n="copy_cmd">Copiar</button>
             </div>

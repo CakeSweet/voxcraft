@@ -24,6 +24,7 @@
 - [Overview](#overview)
 - [Features](#features)
 - [Installation](#installation)
+- [Updates](#updates)
 - [Routing to Discord & Games](#routing-to-discord--games)
 - [Running from Source](#running-from-source)
 - [Building Installers](#building-installers)
@@ -41,7 +42,7 @@ It routes your physical microphone through a studio-grade DSP chain and sends th
 | Module | What it includes |
 | --- | --- |
 | **Dynamics** | Input Gain, Noise Gate (with live status indicator), Compressor, Output Volume |
-| **Pitch & Vocoder** | Pitch Shifter (semitones + fine tune), Frequency Shifter, multi-waveform Vocoder (Sine, Triangle, Square, Sawtooth, Chord, Whisper) |
+| **Pitch & Vocoder** | Pitch Shifter (semitones + fine tune), Frequency Shifter, Vocoder (Sawtooth, Chord, Square, Whisper/Noise) |
 | **Equalizer** | 5-Band EQ (`120 Hz`, `400 Hz`, `1.2 kHz`, `3.5 kHz`, `7.5 kHz`) + High-Pass (HPF) and Low-Pass (LPF) filters, with live frequency-response graph |
 | **Modulation & FX** | Phaser, Wah-Wah, Chorus & Flanger, Tremolo, Ring Modulator (Robot), Distortion & Bitcrusher, Echo/Delay, Reverb |
 
@@ -52,18 +53,24 @@ volume, Noise Gate, and Compressor are global and stay unchanged when switching 
 
 ### Voice Shortcut
 
-Switch between processed and original voice with a configurable key while the
-VoxCraft window is focused. Choose **Toggle** or **Hold** in Settings.
-Original Voice bypasses effects but keeps the configured gains.
+Switch between processed and original voice with **F9** by default. Choose
+**Toggle** or **Hold** in Settings. When registered globally, the shortcut also
+works with VoxCraft hidden in the tray. On Wayland, global registration depends
+on the desktop's shortcut portal; if unavailable, the shortcut only works with
+the window focused. Original Voice bypasses effects but keeps the configured gains.
+The development build adds a short local tone when the shortcut is pressed.
+
+The window's **Minimize** and **Close** buttons hide VoxCraft without stopping
+audio. Use **Stop Audio** to stop capture or **Quit** in the tray to exit.
 
 ## Installation
 
 ### Windows
 
 1. Download `VoxCraftStudio_Setup_v<version>.exe` from [Releases](../../releases).
-2. Run the installer and approve the Windows administrator prompt to install
-   the required VB-Audio Virtual Cable. If approval is denied or installation
-   fails, VoxCraft setup is canceled.
+2. Run the installer. If the required VB-Audio Virtual Cable is missing, the
+   installer downloads it and requests administrator approval. If it cannot
+   confirm the driver installation, VoxCraft setup is canceled.
 3. Launch **VoxCraft Studio**.
 
 ### Linux (`.deb` / `.rpm`)
@@ -73,7 +80,7 @@ Original Voice bypasses effects but keeps the configured gains.
    | Distro | Command |
    | --- | --- |
    | Debian / Ubuntu / Mint / Pop!_OS | `sudo apt install ./voxcraft-studio_<version>_amd64.deb` |
-   | Fedora / RHEL / openSUSE | `sudo dnf install ./voxcraft-studio-<version>-1.x86_64.rpm` |
+   | Fedora / RHEL | `sudo dnf install ./voxcraft-studio-<version>-1.x86_64.rpm` |
 
 2. Launch **VoxCraft Studio** from your application menu or run:
 
@@ -85,13 +92,19 @@ Original Voice bypasses effects but keeps the configured gains.
    virtual sink for the current session if it cannot find one. This does not
    change the system's default output or volume.
 
+## Updates
+
+Use **Update** in the app to check, download, and install a signed release. The
+current source uses the standard Tauri updater for `.exe`, `.deb`, and `.rpm`.
+The APT and DNF commands above are for manual installation.
+
 ## Routing to Discord & Games
 
 On Windows, use [VB-Audio Virtual Cable](https://vb-audio.com/Cable) and select
 `CABLE Output (VB-Audio Virtual Cable)` as the microphone in the receiving app.
 On Linux, VoxCraft creates a virtual audio route and exposes its recording
-source as `voxcraft-output`. Select `voxcraft-output` as the microphone input
-in Discord or the receiving app.
+source as `CABLE Output` (`voxcraft-output` in v2.3.4). Select that source as the
+microphone input in Discord or the receiving app.
 
 **Windows example:**
 
@@ -153,6 +166,7 @@ python scripts/build.py --target linux
 - [Sobre o Programa](#sobre-o-programa)
 - [Principais Recursos](#principais-recursos)
 - [Instalação](#instalação)
+- [Atualizações](#atualizações)
 - [Configuração no Discord e Jogos](#configuração-no-discord-e-jogos)
 - [Executar pelo Código-Fonte](#executar-pelo-código-fonte)
 - [Gerar Instaladores](#gerar-instaladores)
@@ -170,7 +184,7 @@ Ele roteia o seu microfone físico por uma cadeia de efeitos e envia o resultado
 | Módulo | O que inclui |
 | --- | --- |
 | **Dinâmica** | Ganho de Entrada, Noise Gate (com indicador ao vivo), Compressor, Volume de Saída |
-| **Tom & Vocoder** | Alterador de Tom / Pitch (semitons + ajuste fino), Frequency Shifter, Vocoder com múltiplas formas de onda (Senoide, Triangular, Quadrada, Dente de Serra, Acorde, Sussurro) |
+| **Tom & Vocoder** | Alterador de Tom / Pitch (semitons + ajuste fino), Frequency Shifter, Vocoder (Dente de Serra, Acorde, Quadrada, Sussurro/Ruído) |
 | **Equalizador** | Equalizador de 5 bandas (`120 Hz`, `400 Hz`, `1.2 kHz`, `3.5 kHz`, `7.5 kHz`) + filtros Passa-Altas (HPF) e Passa-Baixas (LPF), com gráfico da curva de resposta ao vivo |
 | **Modulação & Efeitos** | Phaser, Wah-Wah, Chorus & Flanger, Tremolo, Ring Modulator (Robô), Distorção & Bitcrusher, Eco/Delay, Reverb |
 
@@ -182,18 +196,25 @@ mudam ao trocar de preset.
 
 ### Atalho de Voz
 
-Alterne entre a voz com efeitos e a voz original usando uma tecla configurável
-enquanto a janela do VoxCraft estiver focada. Escolha **Alternar** ou **Segurar**
-em Configurações. Voz Original ignora os efeitos, mas mantém os ganhos configurados.
+Alterne entre a voz com efeitos e a voz original com **F9** por padrão. Escolha
+**Alternar** ou **Segurar** em Configurações. Quando registrado como global, o
+atalho funciona com o VoxCraft oculto na bandeja. No Wayland, o registro depende
+do portal de atalhos do ambiente gráfico; se indisponível, o atalho só funciona
+com a janela focada. Voz Original ignora os efeitos, mas mantém os ganhos
+configurados. A versão em desenvolvimento toca um bip curto local ao pressionar
+o atalho.
+
+Os botões **Minimizar** e **Fechar** ocultam a janela sem parar o áudio. Use
+**Parar Áudio** para interromper a captura ou **Sair** na bandeja para encerrar.
 
 ## Instalação
 
 ### Windows
 
 1. Baixe `VoxCraftStudio_Setup_v<versão>.exe` na página de [Releases](../../releases).
-2. Execute o instalador e autorize a solicitação de administrador do Windows
-   para instalar o VB-Audio Virtual Cable obrigatório. Se a aprovação for
-   negada ou a instalação falhar, a instalação do VoxCraft será cancelada.
+2. Execute o instalador. Se o VB-Audio Virtual Cable obrigatório não estiver
+   presente, o instalador o baixa e pede autorização de administrador. Se não
+   conseguir confirmar a instalação do driver, a instalação do VoxCraft é cancelada.
 3. Abra o **VoxCraft Studio**.
 
 ### Linux (`.deb` / `.rpm`)
@@ -203,7 +224,7 @@ em Configurações. Voz Original ignora os efeitos, mas mantém os ganhos config
    | Distribuição | Comando |
    | --- | --- |
    | Debian / Ubuntu / Mint / Pop!_OS | `sudo apt install ./voxcraft-studio_<versão>_amd64.deb` |
-   | Fedora / RHEL / openSUSE | `sudo dnf install ./voxcraft-studio-<versão>-1.x86_64.rpm` |
+   | Fedora / RHEL | `sudo dnf install ./voxcraft-studio-<versão>-1.x86_64.rpm` |
 
 2. Abra o **VoxCraft Studio** pelo menu de aplicativos ou execute:
 
@@ -215,12 +236,18 @@ em Configurações. Voz Original ignora os efeitos, mas mantém os ganhos config
    virtual temporário para a sessão se não encontrar um. Isso não altera a
    saída padrão nem o volume do sistema.
 
+## Atualizações
+
+Use **Atualizar** no app para verificar, baixar e instalar uma versão assinada.
+O código atual usa apenas o atualizador padrão do Tauri para `.exe`, `.deb` e
+`.rpm`. Os comandos APT e DNF acima são para instalação manual.
+
 ## Configuração no Discord e Jogos
 
 No Windows, use o [VB-Audio Virtual Cable](https://vb-audio.com/Cable).
-No Linux, o VoxCraft cria uma rota de áudio virtual e expõe a fonte de gravação
-com o nome `voxcraft-output`. No Discord ou no aplicativo que recebe o áudio,
-selecione `voxcraft-output` como microfone.
+No Linux, o VoxCraft cria uma rota de áudio virtual com a fonte `CABLE Output`
+(`voxcraft-output` na v2.3.4). No Discord ou no aplicativo que recebe o áudio,
+selecione essa fonte como microfone.
 
 **Exemplo no Windows:**
 

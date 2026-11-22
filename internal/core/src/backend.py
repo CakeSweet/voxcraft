@@ -6,7 +6,7 @@ import sys
 from typing import Any
 
 from . import APP_VERSION
-from .audio_router import AudioRouter
+from .audio_router import AudioDeviceItem, AudioRouter
 from .dsp_engine import DSPParams, RealTimeDSPEngine
 from .presets import (
     get_builtin_presets,
@@ -28,7 +28,7 @@ class VoxCraftCore:
         self.engine.update_params(self.params)
 
     @staticmethod
-    def _device_data(device: Any) -> dict[str, Any]:
+    def _device_data(device: AudioDeviceItem) -> dict[str, Any]:
         return {
             **asdict(device),
             "label": device.label,
@@ -82,6 +82,61 @@ class VoxCraftCore:
 
         return self._set_params(preset_effect_params(preset))
 
+    def _save_preset(self, name: Any) -> dict[str, str]:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("'name' precisa ser um nome de preset.")
+        name = name.strip()
+        self.user_presets[name] = DSPParams(**preset_effect_params(self.params))
+        save_user_presets(self.user_presets)
+        return {"name": name}
+
+    def _delete_preset(self, name: Any) -> dict[str, str]:
+        if not isinstance(name, str) or name not in self.user_presets:
+            raise ValueError("Somente presets personalizados podem ser excluídos.")
+        del self.user_presets[name]
+        save_user_presets(self.user_presets)
+        return {"deleted": name}
+
+    def _start_audio(self, params: dict[str, Any]) -> dict[str, Any]:
+        try:
+            input_index = int(params["input_index"])
+            output_index = int(params["output_index"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("'input_index' e 'output_index' são obrigatórios.") from exc
+
+        blocksize = int(params.get("blocksize", 512))
+        if blocksize not in (256, 512, 1024):
+            raise ValueError("'blocksize' precisa ser 256, 512 ou 1024.")
+        if not AudioRouter.is_virtual_output(output_index):
+            raise ValueError(
+                "Selecione uma saída virtual para enviar a voz processada "
+                "sem reproduzi-la nos alto-falantes."
+            )
+        monitor_index = params.get("monitor_index")
+        if monitor_index is not None:
+            monitor_index = int(monitor_index)
+        monitor_enabled = bool(params.get("monitor_enabled", False))
+        started, message = self.router.start(
+            in_idx=input_index,
+            out_idx=output_index,
+            blocksize=blocksize,
+            monitor_enabled=monitor_enabled and monitor_index is not None,
+            monitor_idx=monitor_index,
+        )
+        monitor_error = None
+        if started and monitor_enabled and monitor_index is None:
+            try:
+                self.router.set_default_monitor(True)
+            except (ValueError, OSError) as exc:
+                monitor_error = str(exc)
+        return {
+            "started": started,
+            "message": message,
+            "inputIndex": self.router.last_used_in_idx,
+            "outputIndex": self.router.last_used_out_idx,
+            "monitorError": monitor_error,
+        }
+
     def dispatch(self, method: str, params: dict[str, Any]) -> Any:
         if method == "ping":
             return {
@@ -107,59 +162,11 @@ class VoxCraftCore:
         if method == "apply_preset":
             return self._apply_preset(params.get("name"), params.get("custom"))
         if method == "save_preset":
-            name = params.get("name")
-            if not isinstance(name, str) or not name.strip():
-                raise ValueError("'name' precisa ser um nome de preset.")
-            name = name.strip()
-            self.user_presets[name] = DSPParams(**preset_effect_params(self.params))
-            save_user_presets(self.user_presets)
-            return {"name": name}
+            return self._save_preset(params.get("name"))
         if method == "delete_preset":
-            name = params.get("name")
-            if not isinstance(name, str) or name not in self.user_presets:
-                raise ValueError("Somente presets personalizados podem ser excluídos.")
-            del self.user_presets[name]
-            save_user_presets(self.user_presets)
-            return {"deleted": name}
+            return self._delete_preset(params.get("name"))
         if method == "start_audio":
-            try:
-                input_index = int(params["input_index"])
-                output_index = int(params["output_index"])
-            except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError("'input_index' e 'output_index' são obrigatórios.") from exc
-
-            blocksize = int(params.get("blocksize", 512))
-            if blocksize not in (256, 512, 1024):
-                raise ValueError("'blocksize' precisa ser 256, 512 ou 1024.")
-            if not AudioRouter.is_virtual_output(output_index):
-                raise ValueError(
-                    "Selecione uma saída virtual para enviar a voz processada "
-                    "sem reproduzi-la nos alto-falantes."
-                )
-            monitor_index = params.get("monitor_index")
-            if monitor_index is not None:
-                monitor_index = int(monitor_index)
-            monitor_enabled = bool(params.get("monitor_enabled", False))
-            started, message = self.router.start(
-                in_idx=input_index,
-                out_idx=output_index,
-                blocksize=blocksize,
-                monitor_enabled=monitor_enabled and monitor_index is not None,
-                monitor_idx=monitor_index,
-            )
-            monitor_error = None
-            if started and monitor_enabled and monitor_index is None:
-                try:
-                    self.router.set_default_monitor(True)
-                except (ValueError, OSError) as exc:
-                    monitor_error = str(exc)
-            return {
-                "started": started,
-                "message": message,
-                "inputIndex": self.router.last_used_in_idx,
-                "outputIndex": self.router.last_used_out_idx,
-                "monitorError": monitor_error,
-            }
+            return self._start_audio(params)
         if method == "set_monitor":
             self.router.set_default_monitor(bool(params.get("enabled", False)))
             return {}
@@ -184,34 +191,48 @@ class VoxCraftCore:
         self.router.release_linux_virtual_output()
 
 
+def _handle_request(core: VoxCraftCore, line: str) -> tuple[str, bool]:
+    request_id = None
+    try:
+        request = json.loads(line)
+        if not isinstance(request, dict):
+            raise ValueError("Requisição inválida.")
+        request_id = request.get("id")
+        method = request.get("method")
+        params = request.get("params", {})
+        if not isinstance(method, str) or not isinstance(params, dict):
+            raise ValueError("Requisição inválida.")
+        result = core.dispatch(method, params)
+        response = json.dumps(
+            {"id": request_id, "ok": True, "result": result},
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        return response, method == "shutdown"
+    except Exception as exc:
+        error = {"id": request_id, "ok": False, "error": str(exc)}
+        try:
+            return json.dumps(error, ensure_ascii=False, allow_nan=False), False
+        except ValueError:
+            # Python's decoder also accepts non-finite values, which JSON cannot echo.
+            error["id"] = None
+            return json.dumps(error, ensure_ascii=False, allow_nan=False), False
+
+
 def run_stdio_server() -> None:
     core = VoxCraftCore()
-    for line in sys.stdin:
-        request: Any = None
-        method: str | None = None
-        try:
-            request = json.loads(line)
-            request_id = request.get("id")
-            method = request.get("method")
-            params = request.get("params", {})
-            if not isinstance(method, str) or not isinstance(params, dict):
-                raise ValueError("Requisição inválida.")
-            result = core.dispatch(method, params)
-            response = {"id": request_id, "ok": True, "result": result}
-        except Exception as exc:
-            response = {
-                "id": request.get("id") if isinstance(request, dict) else None,
-                "ok": False,
-                "error": str(exc),
-            }
-            method = request.get("method") if isinstance(request, dict) else None
-
-        sys.stdout.write(json.dumps(response, ensure_ascii=False, allow_nan=False) + "\n")
-        sys.stdout.flush()
-        if method == "shutdown" and response["ok"]:
-            break
-
-    core.close()
+    stopping = False
+    try:
+        for line in sys.stdin:
+            response, stopping = _handle_request(core, line)
+            sys.stdout.write(response + "\n")
+            sys.stdout.flush()
+            if stopping:
+                return  # The shutdown command already closed the core.
+    finally:
+        # Also release audio and virtual endpoints on EOF or a broken pipe.
+        if not stopping:
+            core.close()
 
 
 def main() -> None:

@@ -761,6 +761,10 @@ select {
     word-break: break-word;
 }
 
+.dl-cmd-wrap[hidden] {
+    display: none;
+}
+
 /* Footer */
 .footer {
     border-top: 1px solid var(--border-soft);
