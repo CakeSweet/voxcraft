@@ -98,20 +98,28 @@ def package_core(target: str) -> None:
     binaries = CLIENT_DIR / "src-back" / "binaries"
     CORE_BUILD_DIR.mkdir(parents=True, exist_ok=True)
     core_env = {key: value for key, value in os.environ.items() if key not in SIGNING_ENV}
-    run([
-        *python, "-m", "PyInstaller", "--noconfirm", "--onefile",
-        "--name", f"voxcraft-core-{target}",
-        "--distpath", binaries, "--workpath", CORE_BUILD_DIR, "--specpath", CORE_BUILD_DIR,
-        CORE_DIR / "app.py",
-    ], env=core_env)
+    name = f"voxcraft-core-{target}"
+    command = [
+        *python, "-m", "PyInstaller", "--noconfirm",
+        "--distpath", binaries, "--workpath", CORE_BUILD_DIR,
+    ]
+    if sys.platform.startswith("linux"):
+        command.extend([ROOT / "scripts" / "voxcraft-core-linux.spec", "--", name])
+    else:
+        command.extend([
+            "--onefile", "--name", name, "--specpath", CORE_BUILD_DIR,
+            CORE_DIR / "app.py",
+        ])
+    run(command, env=core_env)
     suffix = ".exe" if os.name == "nt" else ""
-    smoke_test_core(binaries / f"voxcraft-core-{target}{suffix}", core_env)
+    smoke_test_core(binaries / f"{name}{suffix}", core_env)
 
 
 def smoke_test_core(executable: Path, env: Mapping[str, str]) -> None:
     requests = [
         json.dumps({"id": 1, "method": "ping"}),
-        json.dumps({"id": 2, "method": "shutdown"}),
+        json.dumps({"id": 2, "method": "list_devices"}),
+        json.dumps({"id": 3, "method": "shutdown"}),
     ]
     with TemporaryDirectory() as directory:
         try:
@@ -127,8 +135,13 @@ def smoke_test_core(executable: Path, env: Mapping[str, str]) -> None:
             replies = [json.loads(line) for line in result.stdout.splitlines()]
             if result.returncode != 0 or [
                 (response.get("id"), response.get("ok")) for response in replies
-            ] != [(1, True), (2, True)]:
+            ] != [(1, True), (2, True), (3, True)]:
                 raise RuntimeError(f"O core empacotado falhou no teste de inicialização:\n{result.stderr}")
+            devices = replies[1].get("result")
+            if not isinstance(devices, dict) or not all(
+                isinstance(devices.get(key), list) for key in ("inputs", "outputs")
+            ):
+                raise RuntimeError("O core empacotado retornou uma lista de dispositivos inválida.")
         except (ValueError, subprocess.TimeoutExpired) as error:
             raise RuntimeError(f"O core empacotado não respondeu corretamente: {error}") from error
 

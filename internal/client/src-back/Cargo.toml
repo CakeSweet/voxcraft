@@ -1,6 +1,6 @@
 [package]
 name = "voxcraft-app"
-version = "2.3.2"
+version = "2.3.3"
 description = "Desktop application shell for VoxCraft Studio"
 authors = ["CakeSweet"]
 edition = "2021"
