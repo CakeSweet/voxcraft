@@ -1598,7 +1598,7 @@ function setupDialogs() {
 
     const setContentInert = (inert) => {
         for (const child of appShell.children) {
-            if (child !== titlebar) child.inert = inert;
+            if (child !== titlebar && child !== modalLayer) child.inert = inert;
         }
     };
 

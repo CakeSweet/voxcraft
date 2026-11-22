@@ -99,17 +99,21 @@ def package_core(target: str) -> None:
     CORE_BUILD_DIR.mkdir(parents=True, exist_ok=True)
     core_env = {key: value for key, value in os.environ.items() if key not in SIGNING_ENV}
     name = f"voxcraft-core-{target}"
-    command = [
-        *python, "-m", "PyInstaller", "--noconfirm",
-        "--distpath", binaries, "--workpath", CORE_BUILD_DIR,
-    ]
     if sys.platform.startswith("linux"):
-        command.extend([ROOT / "scripts" / "voxcraft-core-linux.spec", "--", name])
+        command = [
+            *python,
+            ROOT / "scripts" / "build_core_linux.py",
+            "--distpath", binaries,
+            "--workpath", CORE_BUILD_DIR,
+            "--name", name,
+        ]
     else:
-        command.extend([
+        command = [
+            *python, "-m", "PyInstaller", "--noconfirm",
+            "--distpath", binaries, "--workpath", CORE_BUILD_DIR,
             "--onefile", "--name", name, "--specpath", CORE_BUILD_DIR,
             CORE_DIR / "app.py",
-        ])
+        ]
     run(command, env=core_env)
     suffix = ".exe" if os.name == "nt" else ""
     smoke_test_core(binaries / f"{name}{suffix}", core_env)

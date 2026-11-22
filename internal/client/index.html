@@ -149,116 +149,115 @@
                 <div id="tab-content" class="tab-content custom-scrollbar"></div>
             </section>
         </main>
-    </div>
+        <div id="modal-layer" class="modal-layer" hidden>
+            <div id="modal-backdrop" class="modal-backdrop" aria-hidden="true"></div>
 
-    <div id="modal-layer" class="modal-layer" hidden>
-        <div id="modal-backdrop" class="modal-backdrop" aria-hidden="true"></div>
-
-        <dialog id="settings-dialog" class="dialog custom-scrollbar" aria-labelledby="settings-title">
-            <section class="dialog-card">
-                <header class="dialog-header">
-                    <h2 id="settings-title" data-i18n="settings_title">Configurações</h2>
-                    <button class="icon-button" type="button" data-close-dialog="settings-dialog"
-                            aria-label="Fechar">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-                             stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false">
-                            <path d="m4 4 8 8m0-8-8 8" />
-                        </svg>
-                    </button>
-                </header>
-                <section class="card settings-group">
-                    <h3 class="section-title" data-i18n="appearance_section">Aparência</h3>
-                    <label class="dialog-field">
-                        <span data-i18n="theme_label">Tema</span>
-                        <select id="theme-select" class="select-input">
-                            <option value="dark" data-i18n="theme_dark">Escuro (Dark)</option>
-                            <option value="oled" data-i18n="theme_oled">Dark Puro (OLED)</option>
-                            <option value="light" data-i18n="theme_light">Claro (Light)</option>
-                        </select>
-                    </label>
-                    <label class="dialog-field">
-                        <span data-i18n="language_label">Idioma</span>
-                        <select id="language-select" class="select-input">
-                            <option value="pt">Português</option>
-                            <option value="en">English</option>
-                            <option value="es">Español</option>
-                        </select>
-                    </label>
-                </section>
-
-                <section class="card settings-group">
-                    <h3 class="section-title" data-i18n="audio_section">Áudio</h3>
-                    <label class="dialog-field">
-                        <span data-i18n="latency">Latência</span>
-                        <select id="latency-select" class="select-input">
-                            <option value="256" data-i18n="lat_ultra">Ultra (256)</option>
-                            <option value="512" selected data-i18n="lat_low">Baixa (512)</option>
-                            <option value="1024" data-i18n="lat_stable">Estável (1024)</option>
-                        </select>
-                    </label>
-                </section>
-
-                <section class="card settings-group hotkey-settings">
-                    <h3 class="section-title" data-i18n="hotkey_section">Atalho</h3>
-                    <div class="hotkey-options">
-                        <label class="switch-row">
-                            <input id="hotkey-enabled" type="checkbox" checked />
-                            <span class="switch-track" aria-hidden="true"></span>
-                            <span data-i18n="enable_hotkey">Ativar atalho</span>
+            <dialog id="settings-dialog" class="dialog custom-scrollbar" aria-labelledby="settings-title">
+                <section class="dialog-card">
+                    <header class="dialog-header">
+                        <h2 id="settings-title" data-i18n="settings_title">Configurações</h2>
+                        <button class="icon-button" type="button" data-close-dialog="settings-dialog"
+                                aria-label="Fechar">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                                 stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false">
+                                <path d="m4 4 8 8m0-8-8 8" />
+                            </svg>
+                        </button>
+                    </header>
+                    <section class="card settings-group">
+                        <h3 class="section-title" data-i18n="appearance_section">Aparência</h3>
+                        <label class="dialog-field">
+                            <span data-i18n="theme_label">Tema</span>
+                            <select id="theme-select" class="select-input">
+                                <option value="dark" data-i18n="theme_dark">Escuro (Dark)</option>
+                                <option value="oled" data-i18n="theme_oled">Dark Puro (OLED)</option>
+                                <option value="light" data-i18n="theme_light">Claro (Light)</option>
+                            </select>
                         </label>
-                        <label class="switch-row">
-                            <input id="hotkey-hold" type="checkbox" />
-                            <span class="switch-track" aria-hidden="true"></span>
-                            <span data-i18n="hold_key">Segurar tecla</span>
+                        <label class="dialog-field">
+                            <span data-i18n="language_label">Idioma</span>
+                            <select id="language-select" class="select-input">
+                                <option value="pt">Português</option>
+                                <option value="en">English</option>
+                                <option value="es">Español</option>
+                            </select>
                         </label>
-                    </div>
-                    <p id="hotkey-status" class="field-label" role="status" hidden></p>
-                    <div class="hotkey-row">
-                        <button id="hotkey-key" class="button hotkey-key" type="button">F9</button>
+                    </section>
+
+                    <section class="card settings-group">
+                        <h3 class="section-title" data-i18n="audio_section">Áudio</h3>
+                        <label class="dialog-field">
+                            <span data-i18n="latency">Latência</span>
+                            <select id="latency-select" class="select-input">
+                                <option value="256" data-i18n="lat_ultra">Ultra (256)</option>
+                                <option value="512" selected data-i18n="lat_low">Baixa (512)</option>
+                                <option value="1024" data-i18n="lat_stable">Estável (1024)</option>
+                            </select>
+                        </label>
+                    </section>
+
+                    <section class="card settings-group hotkey-settings">
+                        <h3 class="section-title" data-i18n="hotkey_section">Atalho</h3>
+                        <div class="hotkey-options">
+                            <label class="switch-row">
+                                <input id="hotkey-enabled" type="checkbox" checked />
+                                <span class="switch-track" aria-hidden="true"></span>
+                                <span data-i18n="enable_hotkey">Ativar atalho</span>
+                            </label>
+                            <label class="switch-row">
+                                <input id="hotkey-hold" type="checkbox" />
+                                <span class="switch-track" aria-hidden="true"></span>
+                                <span data-i18n="hold_key">Segurar tecla</span>
+                            </label>
+                        </div>
+                        <p id="hotkey-status" class="field-label" role="status" hidden></p>
+                        <div class="hotkey-row">
+                            <button id="hotkey-key" class="button hotkey-key" type="button">F9</button>
+                        </div>
+                    </section>
+                </section>
+            </dialog>
+
+            <dialog id="updates-dialog" class="dialog custom-scrollbar">
+                <section class="dialog-card">
+                    <header class="dialog-header">
+                        <h2 data-i18n="upd_header">Atualização do VoxCraft Studio</h2>
+                        <button class="icon-button" type="button" data-close-dialog="updates-dialog"
+                                aria-label="Fechar">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                                 stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false">
+                                <path d="m4 4 8 8m0-8-8 8" />
+                            </svg>
+                        </button>
+                    </header>
+                    <p id="update-status" class="update-status" role="status">As atualizações são verificadas automaticamente ao
+                        iniciar.</p>
+                    <div class="dialog-actions">
+                        <button id="check-updates" class="button button-primary" type="button" data-action="check"
+                                data-i18n="upd_check_btn">Verificar</button>
+                        <button class="button" type="button" data-close-dialog="updates-dialog"
+                                data-i18n="close">Fechar</button>
                     </div>
                 </section>
-            </section>
-        </dialog>
+            </dialog>
 
-        <dialog id="updates-dialog" class="dialog custom-scrollbar">
-            <section class="dialog-card">
-                <header class="dialog-header">
-                    <h2 data-i18n="upd_header">Atualização do VoxCraft Studio</h2>
-                    <button class="icon-button" type="button" data-close-dialog="updates-dialog"
-                            aria-label="Fechar">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
-                             stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false">
-                            <path d="m4 4 8 8m0-8-8 8" />
-                        </svg>
-                    </button>
-                </header>
-                <p id="update-status" class="update-status" role="status">As atualizações são verificadas automaticamente ao
-                    iniciar.</p>
-                <div class="dialog-actions">
-                    <button id="check-updates" class="button button-primary" type="button" data-action="check"
-                            data-i18n="upd_check_btn">Verificar</button>
-                    <button class="button" type="button" data-close-dialog="updates-dialog"
-                            data-i18n="close">Fechar</button>
-                </div>
-            </section>
-        </dialog>
-
-        <dialog id="message-dialog" class="dialog message-dialog custom-scrollbar"
-                aria-labelledby="message-title" aria-describedby="message-text">
-            <form id="message-form" class="dialog-card" novalidate>
-                <header class="dialog-header">
-                    <h2 id="message-title"></h2>
-                </header>
-                <p id="message-text" class="message-text"></p>
-                <input id="message-input" class="message-input" type="text"
-                       aria-labelledby="message-text" autocomplete="off" hidden />
-                <div class="dialog-actions">
-                    <button id="message-cancel" class="button" type="button"
-                            data-close-dialog="message-dialog" data-i18n="cancel">Cancelar</button>
-                    <button id="message-accept" class="button button-primary" type="submit">OK</button>
-                </div>
-            </form>
-        </dialog>
+            <dialog id="message-dialog" class="dialog message-dialog custom-scrollbar"
+                    aria-labelledby="message-title" aria-describedby="message-text">
+                <form id="message-form" class="dialog-card" novalidate>
+                    <header class="dialog-header">
+                        <h2 id="message-title"></h2>
+                    </header>
+                    <p id="message-text" class="message-text"></p>
+                    <input id="message-input" class="message-input" type="text"
+                           aria-labelledby="message-text" autocomplete="off" hidden />
+                    <div class="dialog-actions">
+                        <button id="message-cancel" class="button" type="button"
+                                data-close-dialog="message-dialog" data-i18n="cancel">Cancelar</button>
+                        <button id="message-accept" class="button button-primary" type="submit">OK</button>
+                    </div>
+                </form>
+            </dialog>
+        </div>
     </div>
 
     <script type="module" src="/src-front/main.js"></script>
