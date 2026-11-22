@@ -120,8 +120,7 @@ servidor JSON Lines e aguarda comandos em stdin; para abrir o aplicativo, use
 `.github/workflows/release.yml` publica por tags de versão e permite um build
 manual sem publicar. `scripts/release.py`
 valida a versão e só gera o `latest.json` se todos os pacotes e assinaturas
-estiverem presentes. Veja `docs/release.md` para configurar as chaves
-e validar o fluxo entre duas versões.
+estiverem presentes.
 
 O GitHub Pages publica o site estático de `main:/docs`. Preserve `docs/` e
 `docs/.nojekyll` enquanto essa for a origem configurada no Pages.

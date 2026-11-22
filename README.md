@@ -130,8 +130,7 @@ Python dependencies installed with `python scripts/install.py`.
 python scripts/build.py --target windows
 ```
 
-The package includes the Python core. See [release and updater setup](docs/release.md)
-for signing keys, build dependencies, and publishing tagged releases.
+The package includes the Python core.
 
 ### Linux (`.deb` & `.rpm`)
 
@@ -261,8 +260,7 @@ e dependências Python instaladas com `python scripts/install.py`.
 python scripts/build.py --target windows
 ```
 
-O pacote inclui o core Python. Veja [configuração de releases e atualizações](docs/release.md)
-para chaves, dependências de build e publicação por tag.
+O pacote inclui o core Python.
 
 ### Linux (`.deb` e `.rpm`)
 
