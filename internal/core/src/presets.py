@@ -27,9 +27,9 @@ def get_user_data_dir() -> str:
 USER_PRESETS_FILE = os.path.join(get_user_data_dir(), "user_presets.json")
 GLOBAL_DYNAMICS_FIELDS = frozenset({
     "input_gain_db", "output_gain_db",
-    "gate_enabled", "gate_threshold_db",
+    "gate_threshold_db",
     "comp_enabled", "comp_threshold_db", "comp_ratio",
-    "noise_suppression_enabled",
+    "noise_suppression_level",
 })
 PRESET_EXCLUDED_FIELDS = GLOBAL_DYNAMICS_FIELDS | {"bypass"}
 

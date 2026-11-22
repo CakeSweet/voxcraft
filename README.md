@@ -31,9 +31,12 @@
 
 ## Overview
 
-**VoxCraft Studio** is a real-time voice modulator with a Tauri desktop interface and a Python audio/DSP core using `sounddevice`, `numpy`, `scipy`, and `pywebrtc-audio` for WebRTC noise suppression.
+**VoxCraft Studio** is a real-time voice modulator with a Tauri desktop interface and a Python audio/DSP core using `sounddevice`, `numpy`, and `scipy`.
 
 It routes your physical microphone through a studio-grade DSP chain and sends the result straight into virtual audio cables (such as **VB-Audio Virtual Cable**), ready for Discord, games, streaming, and voice calls.
+
+The level meters use a visual 0–60 scale mapped from −60–0 dBFS; Output
+Volume ranges up to +30 dB.
 
 ## Features
 
@@ -41,7 +44,7 @@ It routes your physical microphone through a studio-grade DSP chain and sends th
 
 | Module | What it includes |
 | --- | --- |
-| **Dynamics** | Input Gain, WebRTC Noise Suppression, Noise Gate (with live status indicator), Compressor, Output Volume |
+| **Dynamics** | Input Gain, adaptive Python spectral noise suppression (four levels), Python Noise Gate (live status), Compressor, Output Volume (up to +30 dB) |
 | **Pitch & Vocoder** | Pitch Shifter (semitones + fine tune), Frequency Shifter, Vocoder (Sawtooth, Chord, Square, Whisper/Noise) |
 | **Equalizer** | 5-Band EQ (`120 Hz`, `400 Hz`, `1.2 kHz`, `3.5 kHz`, `7.5 kHz`) + High-Pass (HPF) and Low-Pass (LPF) filters, with live frequency-response graph |
 | **Modulation & FX** | Phaser, Wah-Wah, Chorus & Flanger, Tremolo, Ring Modulator (Robot), Distortion & Bitcrusher, Echo/Delay, Reverb |
@@ -49,7 +52,7 @@ It routes your physical microphone through a studio-grade DSP chain and sends th
 ### Presets
 
 Built-in voice presets plus custom presets saved locally. Input gain, output
-volume, Noise Suppression, Noise Gate, and Compressor are global and stay unchanged when switching presets.
+volume, Noise Gate, Noise Suppression, and Compressor are global and stay unchanged when switching presets.
 
 ### Voice Shortcut
 
@@ -130,9 +133,6 @@ output.
 
 ## Running from Source
 
-Python 3.10–3.14 has prebuilt `pywebrtc-audio` wheels. Python 3.15 currently
-requires building that dependency from source with Python development headers.
-
 ```bash
 python scripts/install.py
 python scripts/dev.py
@@ -178,9 +178,12 @@ python scripts/build.py --target linux
 
 ## Sobre o Programa
 
-O **VoxCraft Studio** é um modulador de voz em tempo real com interface desktop Tauri e core de áudio/DSP em Python, usando `sounddevice`, `numpy`, `scipy` e `pywebrtc-audio` para supressão de ruído WebRTC.
+O **VoxCraft Studio** é um modulador de voz em tempo real com interface desktop Tauri e core de áudio/DSP em Python, usando `sounddevice`, `numpy` e `scipy`.
 
 Ele roteia o seu microfone físico por uma cadeia de efeitos e envia o resultado diretamente para cabos de áudio virtuais (como o **VB-Audio Virtual Cable**), pronto para uso no Discord, jogos, lives e chamadas.
+
+Os medidores usam escala visual de 0–60 mapeada de −60 a 0 dBFS; o Volume
+de Saída pode ser ajustado até +30 dB.
 
 ## Principais Recursos
 
@@ -188,7 +191,7 @@ Ele roteia o seu microfone físico por uma cadeia de efeitos e envia o resultado
 
 | Módulo | O que inclui |
 | --- | --- |
-| **Dinâmica** | Ganho de Entrada, Supressão de Ruído WebRTC, Noise Gate (com indicador ao vivo), Compressor, Volume de Saída |
+| **Dinâmica** | Ganho de Entrada, supressão espectral adaptativa em Python (quatro níveis), Noise Gate em Python (indicador ao vivo), Compressor, Volume de Saída (até +30 dB) |
 | **Tom & Vocoder** | Alterador de Tom / Pitch (semitons + ajuste fino), Frequency Shifter, Vocoder (Dente de Serra, Acorde, Quadrada, Sussurro/Ruído) |
 | **Equalizador** | Equalizador de 5 bandas (`120 Hz`, `400 Hz`, `1.2 kHz`, `3.5 kHz`, `7.5 kHz`) + filtros Passa-Altas (HPF) e Passa-Baixas (LPF), com gráfico da curva de resposta ao vivo |
 | **Modulação & Efeitos** | Phaser, Wah-Wah, Chorus & Flanger, Tremolo, Ring Modulator (Robô), Distorção & Bitcrusher, Eco/Delay, Reverb |
@@ -196,7 +199,7 @@ Ele roteia o seu microfone físico por uma cadeia de efeitos e envia o resultado
 ### Presets
 
 Presets prontos e suporte para salvar e excluir vozes personalizadas.
-Ganho de Entrada, Volume de Saída, Supressão de Ruído, Noise Gate e Compressor são globais e não
+Ganho de Entrada, Volume de Saída, Noise Gate, Supressão de Ruído e Compressor são globais e não
 mudam ao trocar de preset.
 
 ### Atalho de Voz
@@ -277,10 +280,6 @@ saída virtual.
 > 💡 **Dica:** desative o Krisp no Discord caso ele esteja cortando os efeitos.
 
 ## Executar pelo Código-Fonte
-
-Python 3.10–3.14 possui wheels pré-compiladas de `pywebrtc-audio`. Python 3.15
-atualmente exige compilar essa dependência a partir do código-fonte com os
-headers de desenvolvimento do Python.
 
 ```bash
 python scripts/install.py

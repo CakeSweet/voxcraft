@@ -2,7 +2,7 @@ from dataclasses import dataclass, asdict
 import threading
 import numpy as np
 from scipy import signal
-from pywebrtc_audio import AudioProcessor
+from .noise_suppressor import StreamingNoiseSuppressor
 
 
 @dataclass
@@ -12,13 +12,12 @@ class DSPParams:
     input_gain_db: float = 0.0
     output_gain_db: float = 0.0
 
-    # Noise Gate & Compressor (Limpeza para Discord)
-    gate_enabled: bool = True
+    # Supressão de ruído e compressor
+    noise_suppression_level: int = 2  # Supressão espectral Python: 0–3
     gate_threshold_db: float = -44.0
     comp_enabled: bool = True
     comp_threshold_db: float = -18.0
     comp_ratio: float = 4.0
-    noise_suppression_enabled: bool = True
 
     # Alterar Tom (Pitch Shifter estilo Audacity)
     pitch_enabled: bool = False
@@ -103,6 +102,13 @@ class DSPParams:
     reverb_room: float = 0.6       # 0.0 a 1.0
     reverb_damp: float = 0.45      # 0.0 a 1.0
     reverb_mix: float = 0.3
+
+    def __post_init__(self):
+        if (
+            type(self.noise_suppression_level) is not int
+            or self.noise_suppression_level not in range(4)
+        ):
+            raise ValueError("O nível da supressão de ruído precisa estar entre 0 e 3.")
 
     def copy(self) -> "DSPParams":
         return DSPParams(**asdict(self))
@@ -267,44 +273,6 @@ class RingDelay:
             self.write_idx = rest
 
 
-class StreamingNoiseSuppressor:
-    """Adapta o WebRTC NS de quadros de 10 ms aos blocos variáveis do PortAudio."""
-
-    def __init__(self, sample_rate: float, level: int = 2):
-        self.frame_samples = max(1, int(round(sample_rate / 100.0)))
-        self.processor = AudioProcessor(
-            sample_rate=int(round(sample_rate)),
-            num_channels=1,
-            noise_suppression=True,
-            ns_level=level,
-        )
-        self._input = np.empty(0, dtype=np.float32)
-        # Um quadro inicial mantém uma latência fixa enquanto o primeiro quadro é formado.
-        self._output = np.zeros(self.frame_samples, dtype=np.float32)
-
-    def reset(self) -> None:
-        self.processor.reset()
-        self._input = np.empty(0, dtype=np.float32)
-        self._output = np.zeros(self.frame_samples, dtype=np.float32)
-
-    def process(self, samples: np.ndarray) -> np.ndarray:
-        source = np.asarray(samples, dtype=np.float32)
-        self._input = np.concatenate((self._input, source))
-
-        while len(self._input) >= self.frame_samples:
-            frame = self._input[:self.frame_samples].copy()
-            enhanced = np.asarray(self.processor.process(frame), dtype=np.float32).reshape(-1)
-            if len(enhanced) != self.frame_samples:
-                raise RuntimeError("O supressor WebRTC retornou um quadro de tamanho inválido.")
-            self._output = np.concatenate((self._output, enhanced))
-            self._input = self._input[self.frame_samples:]
-
-        count = len(source)
-        output = self._output[:count].copy()
-        self._output = self._output[count:]
-        return output
-
-
 class RealTimeDSPEngine:
     def __init__(self, sample_rate: float = 48000.0):
         self._lock = threading.Lock()
@@ -314,7 +282,6 @@ class RealTimeDSPEngine:
         # Métricas para a UI
         self.input_peak_db = -60.0
         self.output_peak_db = -60.0
-        self.gate_is_open = True
         self.last_waveform = np.zeros(256, dtype=np.float32)
         self._ramp_f64 = np.arange(2048, dtype=np.float64)
 
@@ -335,13 +302,15 @@ class RealTimeDSPEngine:
     def update_params(self, new_params: DSPParams):
         with self._lock:
             prev_bypass = bool(self.params.bypass)
-            prev_noise_suppression = bool(self.params.noise_suppression_enabled)
+            prev_noise_suppression_level = self.params.noise_suppression_level
             self.params = new_params.copy()
             self._eq_dirty = True
             if bool(self.params.bypass) != prev_bypass:
                 self._pending_clear = True
-            if bool(self.params.noise_suppression_enabled) != prev_noise_suppression:
-                self._noise_suppressor.reset()
+            if self.params.noise_suppression_level != prev_noise_suppression_level:
+                self._noise_suppressor = StreamingNoiseSuppressor(
+                    self.sr, level=self.params.noise_suppression_level
+                )
 
     def clear_effect_buffers(self):
         with self._lock:
@@ -349,11 +318,16 @@ class RealTimeDSPEngine:
 
     def _init_states(self):
         sr = self.sr
-        self._noise_suppressor = StreamingNoiseSuppressor(sr)
+        self._noise_suppressor = StreamingNoiseSuppressor(
+            sr, level=self.params.noise_suppression_level
+        )
 
-        # Noise Gate & Compressor
+        # Noise Gate
         self._gate_gain = 1.0
         self._gate_hold_counter = 0
+        self.gate_is_open = True
+
+        # Compressor
         self._comp_gain = 1.0
 
         # Pitch Shifter (Dual-Tap Delay Line, janela ~45ms)
@@ -446,6 +420,9 @@ class RealTimeDSPEngine:
 
     def _clear_effect_buffers_unlocked(self):
         self._noise_suppressor.reset()
+        self._gate_gain = 1.0
+        self._gate_hold_counter = 0
+        self.gate_is_open = True
         self._pitch_hist.fill(0.0)
         self._pitch_phase = 0.0
         self._hilb_zi.fill(0.0)
@@ -542,31 +519,11 @@ class RealTimeDSPEngine:
     def _process_chain_unlocked(self, x: np.ndarray, p: DSPParams) -> np.ndarray:
         n = len(x)
 
-        # 1. Supressão WebRTC; o adaptador preserva o alinhamento entre callbacks.
-        if p.noise_suppression_enabled:
-            x = self._noise_suppressor.process(x)
+        # 1. Supressão espectral adaptativa em Python; preserva quadros entre callbacks.
+        x = self._noise_suppressor.process(x)
 
-        # 2. Noise Gate (antes de distorção/reverb para cauda natural)
-        rms = float(np.sqrt(np.mean(x * x) + 1e-12))
-        rms_db = 20.0 * np.log10(rms)
-        hold_blocks = max(1, int(0.14 * self.sr / n))
-        if rms_db >= p.gate_threshold_db:
-            self._gate_hold_counter = hold_blocks
-            target_g = 1.0
-            self.gate_is_open = True
-        elif self._gate_hold_counter > 0:
-            self._gate_hold_counter -= 1
-            target_g = 1.0
-            self.gate_is_open = True
-        else:
-            target_g = 0.0005  # -66 dB
-            self.gate_is_open = False
-
-        coeff = 0.45 if target_g > self._gate_gain else 0.22
-        next_g = self._gate_gain + coeff * (target_g - self._gate_gain)
-        ramp = np.linspace(self._gate_gain, next_g, n, dtype=np.float32)
-        x *= ramp
-        self._gate_gain = float(next_g)
+        # 2. Noise Gate depois da supressão, antes do compressor.
+        x = self._apply_noise_gate_unlocked(x, p.gate_threshold_db)
 
         # 3. Compressor
         rms = float(np.sqrt(np.mean(x * x) + 1e-12))
@@ -643,6 +600,30 @@ class RealTimeDSPEngine:
         if p.reverb_enabled and p.reverb_mix > 0.01:
             x = self._process_reverb(x, p.reverb_room, p.reverb_damp, p.reverb_mix)
 
+        return x
+
+    def _apply_noise_gate_unlocked(self, x: np.ndarray, threshold_db: float) -> np.ndarray:
+        n = len(x)
+        rms = float(np.sqrt(np.mean(x * x) + 1e-12))
+        rms_db = 20.0 * np.log10(rms)
+        hold_blocks = max(1, int(0.14 * self.sr / n))
+
+        if rms_db >= threshold_db:
+            self._gate_hold_counter = hold_blocks
+            target_gain = 1.0
+            self.gate_is_open = True
+        elif self._gate_hold_counter > 0:
+            self._gate_hold_counter -= 1
+            target_gain = 1.0
+            self.gate_is_open = True
+        else:
+            target_gain = 0.0005  # atenua até aproximadamente -66 dB
+            self.gate_is_open = False
+
+        coefficient = 0.45 if target_gain > self._gate_gain else 0.22
+        next_gain = self._gate_gain + coefficient * (target_gain - self._gate_gain)
+        x *= np.linspace(self._gate_gain, next_gain, n, dtype=np.float32)
+        self._gate_gain = float(next_gain)
         return x
 
     def _update_waveform(self, x: np.ndarray):

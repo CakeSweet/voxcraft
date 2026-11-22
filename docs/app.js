@@ -1,6 +1,6 @@
 (() => {
   const REPO = "CakeSweet/voxcraft";
-  const DEFAULT_VERSION = "2.4.0";
+  const DEFAULT_VERSION = "2.5.0";
 
   const PRESET_GROUPS = [
     {
@@ -68,7 +68,7 @@
       pipe_title: "Projetado para voz limpa, baixa latência e controle total no desktop.",
       feat_1_title: "Cadeia DSP em tempo real sem dependências na nuvem",
       feat_1_desc:
-        "Processamento em blocos com NumPy e SciPy: Noise Gate, compressor RMS, Pitch Shifter, Frequency Shifter, Vocoder, equalizador de 5 bandas com filtros HPF/LPF, Chorus/Flanger, Phaser, Auto-Wah, Ring Modulator, distorção, eco e reverb.",
+        "Processamento em blocos com NumPy, SciPy, supressão espectral adaptativa em Python e Noise Gate em Python, compressor RMS, Pitch Shifter, Frequency Shifter, Vocoder, equalizador de 5 bandas com filtros HPF/LPF, Chorus/Flanger, Phaser, Auto-Wah, Ring Modulator, distorção, eco e reverb.",
       feat_1_meta: "Resampling automático entre dispositivos",
       feat_2_title: "Atalho Global Instantâneo",
       feat_2_desc:
@@ -111,7 +111,7 @@
       pipe_title: "Engineered for clean voice routing, low latency, and desktop reliability.",
       feat_1_title: "Real-time DSP chain with zero cloud dependencies",
       feat_1_desc:
-        "Block processing with NumPy and SciPy: noise gate, RMS compressor, pitch shifter, frequency shifter, vocoder, 5-band EQ with HPF/LPF, chorus/flanger, phaser, auto-wah, ring modulator, distortion, echo, and reverb.",
+        "Block processing with NumPy and SciPy, adaptive Python spectral noise suppression and a Python noise gate, RMS compressor, pitch shifter, frequency shifter, vocoder, 5-band EQ with HPF/LPF, chorus/flanger, phaser, auto-wah, ring modulator, distortion, echo, and reverb.",
       feat_1_meta: "Automatic sample-rate resampling",
       feat_2_title: "Instant Global Hotkey",
       feat_2_desc:

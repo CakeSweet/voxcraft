@@ -87,8 +87,8 @@
                     <svg class="topbar-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                          stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
                          aria-hidden="true" focusable="false">
-                        <path d="M12 15V3m0 0 4 4m-4-4L8 7" />
-                        <path d="M5 14v6h14v-6" />
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M12 16V8m-4 4 4-4 4 4" />
                     </svg>
                     <span class="topbar-action-label" data-i18n="update">Atualizar</span>
                 </button>
@@ -148,14 +148,18 @@
                     <div class="meter-row">
                         <span class="meter-label" data-i18n="input_lbl">Entrada</span>
                         <div class="meter-track"><span id="input-meter" class="meter-fill input-fill"></span></div>
-                        <span id="input-db" class="meter-db">−60 dB</span>
+                        <span id="input-db" class="meter-db">0 dB</span>
                     </div>
                     <div class="meter-row">
                         <span class="meter-label" data-i18n="output_lbl">Saída</span>
-                        <div class="meter-track"><span id="output-meter" class="meter-fill output-fill"></span></div>
-                        <span id="output-db" class="meter-db">−60 dB</span>
-                    </div>
-                    <div id="gate-indicator" class="gate-indicator is-open" data-i18n="gate_open">● Noise Gate: Aberto
+                        <div class="meter-track output-gate-track">
+                            <span id="output-meter" class="meter-fill output-fill"></span>
+                            <input id="gate-threshold-range" class="meter-gate-range" type="range"
+                                   min="-65" max="-15" step="0.5" value="-44"
+                                   data-param="gate_threshold_db" data-default="-44" data-unit="dB"
+                                   aria-label="Limite do Noise Gate" title="Limite do Noise Gate: -44 dB">
+                        </div>
+                        <span id="output-db" class="meter-db">0 dB</span>
                     </div>
                     <canvas id="waveform" class="waveform-canvas" aria-label="Forma de onda de áudio"></canvas>
                 </section>

@@ -18,10 +18,12 @@ const TEXT = {
         define_key: "Definir atalho",
         hotkey_local_only: "Atalho global indisponível. Funciona apenas com a janela focada.",
         hold_key: "Segurar tecla", levels_section: "Níveis", input_lbl: "Entrada", output_lbl: "Saída",
-        gate_open: "● Noise Gate: Aberto", gate_closed: "● Noise Gate: Silenciado",
-        dynamics_section: "Dinâmica & Ganho", input_gain: "Ganho de Entrada", noise_gate: "Noise Gate",
-        noise_suppression: "Supressão de Ruído",
-        gate_thresh: "Limite do Gate", compressor: "Compressor", comp_thresh: "Limite Compressor", output_vol: "Volume de Saída",
+        dynamics_section: "Dinâmica & Ganho", input_gain: "Ganho de Entrada",
+        noise_suppression_level: "Intensidade da Supressão",
+        suppression_level_0: "Leve", suppression_level_1: "Moderada",
+        suppression_level_2: "Forte", suppression_level_3: "Máxima",
+        gate_thresh: "Limite do Noise Gate",
+        compressor: "Compressor", comp_thresh: "Limite Compressor", output_vol: "Volume de Saída",
         tab_pitch: "Tom & Vocoder", tab_eq: "Equalizador", tab_mod: "Modulação", tab_fx: "Robô & Distorção",
         tab_space: "Eco & Reverb", tab_mixer: "Mixer", pitch_shift: "Alterar Tom (Pitch)", semitones: "Semitons",
         fine_tune: "Ajuste Fino", mix: "Mistura", freq_shift: "Frequency Shifter", shift_hz: "Deslocamento",
@@ -71,10 +73,12 @@ const TEXT = {
         define_key: "Set shortcut",
         hotkey_local_only: "Global shortcut unavailable. It only works while the window is focused.",
         hold_key: "Hold key", levels_section: "Levels", input_lbl: "Input", output_lbl: "Output",
-        gate_open: "● Noise Gate: Open", gate_closed: "● Noise Gate: Muted",
-        dynamics_section: "Dynamics & Gain", input_gain: "Input Gain", noise_gate: "Noise Gate",
-        noise_suppression: "Noise Suppression",
-        gate_thresh: "Gate Threshold", compressor: "Compressor", comp_thresh: "Compressor Threshold", output_vol: "Output Volume",
+        dynamics_section: "Dynamics & Gain", input_gain: "Input Gain",
+        noise_suppression_level: "Suppression strength",
+        suppression_level_0: "Light", suppression_level_1: "Moderate",
+        suppression_level_2: "Strong", suppression_level_3: "Maximum",
+        gate_thresh: "Noise Gate threshold",
+        compressor: "Compressor", comp_thresh: "Compressor Threshold", output_vol: "Output Volume",
         tab_pitch: "Pitch & Vocoder", tab_eq: "Equalizer", tab_mod: "Modulation", tab_fx: "Robot & Distortion",
         tab_space: "Echo & Reverb", tab_mixer: "Mixer", pitch_shift: "Pitch Shifter", semitones: "Semitones",
         fine_tune: "Fine Tune", mix: "Mix", freq_shift: "Frequency Shifter", shift_hz: "Shift",
@@ -124,10 +128,12 @@ const TEXT = {
         define_key: "Asignar atajo",
         hotkey_local_only: "Atajo global no disponible. Solo funciona con la ventana enfocada.",
         hold_key: "Mantener tecla", levels_section: "Niveles", input_lbl: "Entrada", output_lbl: "Salida",
-        gate_open: "● Noise Gate: Abierto", gate_closed: "● Noise Gate: Silenciado",
-        dynamics_section: "Dinámica y Ganancia", input_gain: "Ganancia de Entrada", noise_gate: "Noise Gate",
-        noise_suppression: "Supresión de ruido",
-        gate_thresh: "Umbral del Gate", compressor: "Compresor", comp_thresh: "Umbral del Compresor", output_vol: "Volumen de Salida",
+        dynamics_section: "Dinámica y Ganancia", input_gain: "Ganancia de Entrada",
+        noise_suppression_level: "Intensidad de supresión",
+        suppression_level_0: "Leve", suppression_level_1: "Moderada",
+        suppression_level_2: "Fuerte", suppression_level_3: "Máxima",
+        gate_thresh: "Umbral del Noise Gate",
+        compressor: "Compresor", comp_thresh: "Umbral del Compresor", output_vol: "Volumen de Salida",
         tab_pitch: "Tono y Vocoder", tab_eq: "Ecualizador", tab_mod: "Modulación", tab_fx: "Robot y Distorsión",
         tab_space: "Eco y Reverb", tab_mixer: "Mezclador", pitch_shift: "Cambiar Tono (Pitch)", semitones: "Semitonos",
         fine_tune: "Ajuste Fino", mix: "Mezcla", freq_shift: "Frequency Shifter", shift_hz: "Desplazamiento",
@@ -168,8 +174,8 @@ const TEXT = {
 };
 
 const PARAMS_DEFAULT = {
-    bypass: false, input_gain_db: 0, output_gain_db: 0, gate_enabled: true, gate_threshold_db: -44,
-    noise_suppression_enabled: true,
+    bypass: false, input_gain_db: 0, output_gain_db: 0,
+    noise_suppression_level: 2, gate_threshold_db: -44,
     comp_enabled: true, comp_threshold_db: -18, pitch_enabled: false, pitch_semitones: 0, pitch_cents: 0,
     pitch_mix: 1, freq_shift_enabled: false, freq_shift_hz: 0, freq_shift_mix: 1, vocoder_enabled: false,
     vocoder_carrier: "Dente de Serra", vocoder_freq_hz: 110, vocoder_smooth: 0.45, vocoder_mix: 0.85,
@@ -587,7 +593,8 @@ function applyLanguage(nextLanguage) {
     document.querySelector("#language-select").value = language;
     document.querySelector("#hotkey-key").setAttribute("aria-description", t("define_key"));
     renderGlobalHotkeyStatus();
-    updateGateIndicator(true);
+    document.querySelectorAll('input[type="range"][data-param]').forEach(updateSliderValue);
+    updateGateRangeDescription(document.querySelector("#gate-threshold-range"));
 }
 
 function applyTheme(nextTheme) {
@@ -628,7 +635,8 @@ function renderControlValues() {
         const factor = Number(control.dataset.factor || 1);
         const uiValue = Number(value) / factor;
         control.value = String(Math.min(Number(control.max), Math.max(Number(control.min), uiValue)));
-        updateSliderValue(control);
+        if (control.id === "gate-threshold-range") updateGateRangeDescription(control);
+        else updateSliderValue(control);
     });
     updateBypassButton();
     drawEqCurve();
@@ -643,10 +651,31 @@ function updateSliderValue(input) {
     const output = input.closest(".slider-card, .vertical-band")?.querySelector("output");
     if (!output) return;
     const value = Number(input.value);
+    if (input.dataset.param === "noise_suppression_level") {
+        output.textContent = t(`suppression_level_${value}`);
+        return;
+    }
     output.textContent =
         input.closest(".vertical-band") && input.dataset.unit === "dB"
             ? `${value >= 0 ? "+" : ""}${value.toFixed(1)} dB`
             : formatSliderValue(value, Number(input.step), input.dataset.unit || "");
+}
+
+function updateGateRangeDescription(input) {
+    if (!input) return;
+    const value = Number(input.value);
+    input.setAttribute("aria-label", t("gate_thresh"));
+    input.setAttribute("aria-valuetext", `${value.toFixed(1)} dB`);
+    input.title = `${t("gate_thresh")}: ${value.toFixed(1)} dB`;
+}
+
+function setupGateThresholdControl() {
+    const input = document.querySelector("#gate-threshold-range");
+    input.addEventListener("input", () => {
+        const value = Number(input.value);
+        updateGateRangeDescription(input);
+        scheduleParameterUpdate("gate_threshold_db", value);
+    });
 }
 
 function scheduleParameterUpdate(key, value, immediate = false) {
@@ -1058,22 +1087,13 @@ function drawWaveform(samples) {
     context.stroke();
 }
 
-function updateGateIndicator(isOpen) {
-    const gate = document.querySelector("#gate-indicator");
-    if (!gate) return;
-    gate.textContent = t(isOpen ? "gate_open" : "gate_closed");
-    gate.classList.toggle("is-open", isOpen);
-    gate.classList.toggle("is-closed", !isOpen);
-}
-
 function updateMeters(meter) {
-    const inputDb = Number(meter.inputPeakDb ?? -60);
-    const outputDb = Number(meter.outputPeakDb ?? -60);
-    document.querySelector("#input-meter").style.width = `${Math.max(0, Math.min(100, ((inputDb + 60) / 60) * 100))}%`;
-    document.querySelector("#output-meter").style.width = `${Math.max(0, Math.min(100, ((outputDb + 60) / 60) * 100))}%`;
-    document.querySelector("#input-db").textContent = `${inputDb.toFixed(0)} dB`;
-    document.querySelector("#output-db").textContent = `${outputDb.toFixed(0)} dB`;
-    updateGateIndicator(Boolean(meter.gateOpen));
+    const inputLevel = Math.max(0, Math.min(60, Number(meter.inputPeakDb ?? -60) + 60));
+    const outputLevel = Math.max(0, Math.min(60, Number(meter.outputPeakDb ?? -60) + 60));
+    document.querySelector("#input-meter").style.width = `${(inputLevel / 60) * 100}%`;
+    document.querySelector("#output-meter").style.width = `${(outputLevel / 60) * 100}%`;
+    document.querySelector("#input-db").textContent = `${inputLevel.toFixed(0)} dB`;
+    document.querySelector("#output-db").textContent = `${outputLevel.toFixed(0)} dB`;
     drawWaveform(meter.waveform);
     if (Boolean(meter.running) !== audioRunning) {
         audioRunning = Boolean(meter.running);
@@ -1575,11 +1595,12 @@ function applyStoredThemeAndLanguage() {
 function buildDynamicsControls() {
     const container = document.querySelector("#dynamics-controls");
     container.append(
-        createSwitch("noise_suppression_enabled", "noise_suppression"),
         createSlider(slider("input_gain_db", "input_gain", -18, 24, 0.5, "dB")),
-        createSlider(slider("gate_threshold_db", "gate_thresh", -65, -15, 0.5, "dB")),
+        createSlider(slider(
+            "noise_suppression_level", "noise_suppression_level", 0, 3, 1, "", 1, true,
+        )),
         createSlider(slider("comp_threshold_db", "comp_thresh", -36, -4, 0.5, "dB")),
-        createSlider(slider("output_gain_db", "output_vol", -24, 24, 0.5, "dB")),
+        createSlider(slider("output_gain_db", "output_vol", -24, 30, 0.5, "dB")),
     );
 }
 
@@ -1840,6 +1861,7 @@ async function connectCore() {
 
 export function initializeStudio() {
     buildDynamicsControls();
+    setupGateThresholdControl();
     renderTabs();
     applyStoredThemeAndLanguage();
     setupEvents();

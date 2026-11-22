@@ -1,4 +1,4 @@
 """VoxCraft Studio desktop application package."""
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.5.0"
 __version__ = APP_VERSION

@@ -14,7 +14,8 @@ streaming. O shell desktop é Tauri 2; o frontend é Vite/JavaScript.
   - `src/backend.py`: estado do motor de áudio e API JSON Lines via stdin/stdout.
   - `src/audio_router.py`: enumeração de dispositivos e streams PortAudio, com
     fallback de configuração, resampling e monitoramento.
-  - `src/dsp_engine.py`: `DSPParams` e cadeia DSP em tempo real com NumPy/SciPy.
+  - `src/dsp_engine.py`: `DSPParams`, Noise Gate e cadeia DSP em tempo real.
+  - `src/noise_suppressor.py`: supressão espectral adaptativa em Python/NumPy.
   - `src/presets.py`: presets nativos e persistência de presets personalizados.
   - `requirements.txt`: dependências do core (`numpy`, `scipy`, `sounddevice`).
 - `internal/client/`: aplicativo Tauri.
@@ -99,9 +100,9 @@ servidor JSON Lines e aguarda comandos em stdin; para abrir o aplicativo, use
   `voxcraft_config.json`. Apenas presets personalizados ficam em
   `user_presets.json`: na raiz gravável em dev e no diretório de configuração
   `VoxCraftStudio` em instalações. Não apague dados locais durante limpeza.
-- Dinâmica & Ganho (ganhos, Noise Gate e Compressor) é global: não permita que
-  presets salvem ou substituam esses campos. Voz Original ignora os efeitos,
-  mas mantém os ganhos.
+- Dinâmica & Ganho (ganhos, Noise Gate, supressão de ruído e Compressor) é
+  global: não permita que presets salvem ou substituam esses campos. Voz
+  Original ignora os efeitos, mas mantém os ganhos.
 - A versão aparece em mais de um lugar: `internal/core/src/__init__.py`,
   `internal/client/package.json` e `package-lock.json`,
   `internal/client/src-back/Cargo.toml` e `Cargo.lock`,

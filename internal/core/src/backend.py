@@ -57,9 +57,7 @@ class VoxCraftCore:
             raise ValueError(f"Parâmetros desconhecidos: {', '.join(sorted(unknown))}")
 
         current.update(raw_params)
-        # Mantém compatibilidade com preferências antigas, mas não permite
-        # desativar a dinâmica global pela API do core.
-        current["gate_enabled"] = True
+        # O compressor permanece parte da dinâmica global e não pode ser desligado.
         current["comp_enabled"] = True
         self.params = DSPParams(**current)
         self.engine.update_params(self.params)
@@ -178,7 +176,6 @@ class VoxCraftCore:
                 "running": self.router.running,
                 "inputPeakDb": self.engine.input_peak_db,
                 "outputPeakDb": self.engine.output_peak_db,
-                "gateOpen": self.engine.gate_is_open,
                 "waveform": self.engine.last_waveform.tolist(),
             }
         if method == "shutdown":

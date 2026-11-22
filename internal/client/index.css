@@ -854,23 +854,41 @@ select {
     background: var(--live);
 }
 
+.output-gate-track {
+    position: relative;
+    overflow: visible;
+}
+
+.output-gate-track .meter-fill {
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+.meter-gate-range {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    left: 0;
+    height: 16px;
+    transform: translateY(-50%);
+}
+
+input[type="range"].meter-gate-range::-webkit-slider-runnable-track {
+    background: transparent;
+}
+
+input[type="range"].meter-gate-range::-moz-range-track {
+    background: transparent;
+}
+
 .meter-db {
     color: var(--text-subtle);
     font-family: "JetBrains Mono", monospace;
     font-size: 8px;
     text-align: right;
-}
-
-.gate-indicator {
-    margin: 7px 0;
-    color: var(--live);
-    font-family: "JetBrains Mono", monospace;
-    font-size: 9px;
-    font-weight: 600;
-}
-
-.gate-indicator.is-closed {
-    color: var(--warn);
 }
 
 .waveform-canvas {
