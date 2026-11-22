@@ -457,11 +457,6 @@ select {
     width: 118px;
 }
 
-#power-button {
-    width: 138px;
-    min-height: 36px;
-}
-
 .button {
     display: inline-flex;
     min-height: 32px;
@@ -516,17 +511,6 @@ select {
     color: var(--accent-text);
 }
 
-.button-primary.is-running {
-    border-color: var(--danger);
-    background: var(--danger);
-    color: #ffffff;
-}
-
-.button-primary.is-running:hover:not(:disabled) {
-    border-color: var(--danger-hover);
-    background: var(--danger-hover);
-}
-
 .button-danger-outline {
     color: #fca5a5;
 }
@@ -550,6 +534,13 @@ select {
 
 .topbar-actions > .button {
     min-height: 36px;
+}
+
+.topbar-action-icon {
+    display: none;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
 }
 
 #bypass-button.is-bypass {
@@ -1516,8 +1507,7 @@ input[type="range"]::-moz-range-thumb {
     .topbar-actions>.button,
     #open-settings,
     #open-updates,
-    #bypass-button,
-    #power-button {
+    #bypass-button {
         width: 100%;
     }
 
@@ -1611,8 +1601,7 @@ input[type="range"]::-moz-range-thumb {
     .topbar-actions > .button,
     #open-settings,
     #open-updates,
-    #bypass-button,
-    #power-button {
+    #bypass-button {
         width: 100%;
     }
 
@@ -1629,5 +1618,26 @@ input[type="range"]::-moz-range-thumb {
 
     .workbench {
         max-width: none;
+    }
+}
+
+@media (min-width: 621px) and (max-width: 1499px) {
+    .topbar-actions > .button {
+        width: 36px;
+        padding: 0;
+    }
+
+    #open-settings,
+    #open-updates,
+    #bypass-button {
+        width: 36px;
+    }
+
+    .topbar-action-icon {
+        display: block;
+    }
+
+    .topbar-action-label {
+        display: none;
     }
 }

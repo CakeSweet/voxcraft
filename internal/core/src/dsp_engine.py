@@ -2,6 +2,7 @@ from dataclasses import dataclass, asdict
 import threading
 import numpy as np
 from scipy import signal
+from pywebrtc_audio import AudioProcessor
 
 
 @dataclass
@@ -17,6 +18,7 @@ class DSPParams:
     comp_enabled: bool = True
     comp_threshold_db: float = -18.0
     comp_ratio: float = 4.0
+    noise_suppression_enabled: bool = True
 
     # Alterar Tom (Pitch Shifter estilo Audacity)
     pitch_enabled: bool = False
@@ -265,6 +267,44 @@ class RingDelay:
             self.write_idx = rest
 
 
+class StreamingNoiseSuppressor:
+    """Adapta o WebRTC NS de quadros de 10 ms aos blocos variáveis do PortAudio."""
+
+    def __init__(self, sample_rate: float, level: int = 2):
+        self.frame_samples = max(1, int(round(sample_rate / 100.0)))
+        self.processor = AudioProcessor(
+            sample_rate=int(round(sample_rate)),
+            num_channels=1,
+            noise_suppression=True,
+            ns_level=level,
+        )
+        self._input = np.empty(0, dtype=np.float32)
+        # Um quadro inicial mantém uma latência fixa enquanto o primeiro quadro é formado.
+        self._output = np.zeros(self.frame_samples, dtype=np.float32)
+
+    def reset(self) -> None:
+        self.processor.reset()
+        self._input = np.empty(0, dtype=np.float32)
+        self._output = np.zeros(self.frame_samples, dtype=np.float32)
+
+    def process(self, samples: np.ndarray) -> np.ndarray:
+        source = np.asarray(samples, dtype=np.float32)
+        self._input = np.concatenate((self._input, source))
+
+        while len(self._input) >= self.frame_samples:
+            frame = self._input[:self.frame_samples].copy()
+            enhanced = np.asarray(self.processor.process(frame), dtype=np.float32).reshape(-1)
+            if len(enhanced) != self.frame_samples:
+                raise RuntimeError("O supressor WebRTC retornou um quadro de tamanho inválido.")
+            self._output = np.concatenate((self._output, enhanced))
+            self._input = self._input[self.frame_samples:]
+
+        count = len(source)
+        output = self._output[:count].copy()
+        self._output = self._output[count:]
+        return output
+
+
 class RealTimeDSPEngine:
     def __init__(self, sample_rate: float = 48000.0):
         self._lock = threading.Lock()
@@ -295,10 +335,13 @@ class RealTimeDSPEngine:
     def update_params(self, new_params: DSPParams):
         with self._lock:
             prev_bypass = bool(self.params.bypass)
+            prev_noise_suppression = bool(self.params.noise_suppression_enabled)
             self.params = new_params.copy()
             self._eq_dirty = True
             if bool(self.params.bypass) != prev_bypass:
                 self._pending_clear = True
+            if bool(self.params.noise_suppression_enabled) != prev_noise_suppression:
+                self._noise_suppressor.reset()
 
     def clear_effect_buffers(self):
         with self._lock:
@@ -306,6 +349,7 @@ class RealTimeDSPEngine:
 
     def _init_states(self):
         sr = self.sr
+        self._noise_suppressor = StreamingNoiseSuppressor(sr)
 
         # Noise Gate & Compressor
         self._gate_gain = 1.0
@@ -401,6 +445,7 @@ class RealTimeDSPEngine:
         self._was_bypass = bool(self.params.bypass)
 
     def _clear_effect_buffers_unlocked(self):
+        self._noise_suppressor.reset()
         self._pitch_hist.fill(0.0)
         self._pitch_phase = 0.0
         self._hilb_zi.fill(0.0)
@@ -496,6 +541,10 @@ class RealTimeDSPEngine:
 
     def _process_chain_unlocked(self, x: np.ndarray, p: DSPParams) -> np.ndarray:
         n = len(x)
+
+        # 1. Supressão WebRTC; o adaptador preserva o alinhamento entre callbacks.
+        if p.noise_suppression_enabled:
+            x = self._noise_suppressor.process(x)
 
         # 2. Noise Gate (antes de distorção/reverb para cauda natural)
         rms = float(np.sqrt(np.mean(x * x) + 1e-12))

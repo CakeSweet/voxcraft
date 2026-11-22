@@ -29,11 +29,13 @@ GLOBAL_DYNAMICS_FIELDS = frozenset({
     "input_gain_db", "output_gain_db",
     "gate_enabled", "gate_threshold_db",
     "comp_enabled", "comp_threshold_db", "comp_ratio",
+    "noise_suppression_enabled",
 })
+PRESET_EXCLUDED_FIELDS = GLOBAL_DYNAMICS_FIELDS | {"bypass"}
 
 
 def preset_effect_params(params: DSPParams) -> dict:
-    return {key: value for key, value in asdict(params).items() if key not in GLOBAL_DYNAMICS_FIELDS}
+    return {key: value for key, value in asdict(params).items() if key not in PRESET_EXCLUDED_FIELDS}
 
 
 def get_builtin_presets() -> dict[str, DSPParams]:

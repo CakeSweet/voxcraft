@@ -58,10 +58,6 @@ export function setupWindowControls(translate) {
     document.querySelector("#window-close").addEventListener("click", () => {
         void appWindow.close().catch((error) => console.error("Não foi possível fechar a janela:", error));
     });
-    void appWindow.onCloseRequested((event) => {
-        event.preventDefault();
-        hideWindow();
-    }).catch((error) => console.error("Não foi possível configurar a bandeja do sistema:", error));
 
     document.querySelectorAll("[data-window-resize]").forEach((handle) => {
         handle.addEventListener("pointerdown", (event) => {

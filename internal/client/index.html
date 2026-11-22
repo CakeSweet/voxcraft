@@ -33,7 +33,7 @@
                     </svg>
                 </button>
                 <button id="window-close" class="window-control window-control-close" type="button"
-                        data-window-control="close_window" aria-label="Fechar janela">
+                        data-window-control="close_window" aria-label="Encerrar VoxCraft Studio">
                     <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
                         <path d="m4 4 8 8M12 4l-8 8" />
                     </svg>
@@ -73,13 +73,35 @@
 
             <div class="topbar-actions">
                 <button id="open-settings" class="button button-small" type="button"
-                        data-i18n="settings">Configurações</button>
+                        data-i18n-label="settings" aria-label="Configurações">
+                    <svg class="topbar-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+                         aria-hidden="true" focusable="false">
+                        <path d="M12.22 2h-.44a2 2 0 0 0-1.99 1.72l-.16 1.16a2 2 0 0 1-1.07 1.44l-1.01.58a2 2 0 0 1-1.79.09l-1.08-.48a2 2 0 0 0-2.46.79l-.22.38a2 2 0 0 0 .47 2.55l.92.73a2 2 0 0 1 .72 1.51v1.16a2 2 0 0 1-.72 1.51l-.92.73a2 2 0 0 0-.47 2.55l.22.38a2 2 0 0 0 2.46.79l1.08-.48a2 2 0 0 1 1.79.09l1.01.58a2 2 0 0 1 1.07 1.44l.16 1.16A2 2 0 0 0 11.78 22h.44a2 2 0 0 0 1.99-1.72l.16-1.16a2 2 0 0 1 1.07-1.44l1.01-.58a2 2 0 0 1 1.79-.09l1.08.48a2 2 0 0 0 2.46-.79l.22-.38a2 2 0 0 0-.47-2.55l-.92-.73a2 2 0 0 1-.72-1.51v-1.16a2 2 0 0 1 .72-1.51l.92-.73a2 2 0 0 0 .47-2.55l-.22-.38a2 2 0 0 0-2.46-.79l-1.08.48a2 2 0 0 1-1.79-.09l-1.01-.58a2 2 0 0 1-1.07-1.44l-.16-1.16A2 2 0 0 0 12.22 2z" />
+                        <circle cx="12" cy="12" r="3" />
+                    </svg>
+                    <span class="topbar-action-label" data-i18n="settings">Configurações</span>
+                </button>
                 <button id="open-updates" class="button button-small" type="button"
-                        data-i18n="update">Atualizar</button>
+                        data-i18n-label="update" aria-label="Atualizar">
+                    <svg class="topbar-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+                         aria-hidden="true" focusable="false">
+                        <path d="M12 15V3m0 0 4 4m-4-4L8 7" />
+                        <path d="M5 14v6h14v-6" />
+                    </svg>
+                    <span class="topbar-action-label" data-i18n="update">Atualizar</span>
+                </button>
                 <button id="bypass-button" class="button button-small" type="button" aria-pressed="false"
-                        data-i18n="original_voice">Voz Original</button>
-                <button id="power-button" class="button button-primary" type="button" data-i18n="start_audio">Iniciar
-                    Áudio</button>
+                        data-i18n-label="original_voice" aria-label="Voz Original">
+                    <svg class="topbar-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+                         aria-hidden="true" focusable="false">
+                        <rect x="9" y="2" width="6" height="12" rx="3" />
+                        <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8" />
+                    </svg>
+                    <span class="topbar-action-label" data-i18n="original_voice">Voz Original</span>
+                </button>
             </div>
         </header>
 

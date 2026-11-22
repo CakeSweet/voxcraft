@@ -10,7 +10,7 @@ const TEXT = {
         cancel: "Cancelar", notice: "Aviso",
         preset: "Preset", current_config: "Configuração atual", save: "Salvar", delete: "Excluir",
         settings: "Configurações", update: "Atualizar", original_voice: "Voz Original",
-        start_audio: "Iniciar Áudio", stop_audio: "Parar Áudio", audio_section: "Áudio", microphone: "Microfone",
+        audio_section: "Áudio", microphone: "Microfone",
         output: "Destino da voz filtrada", status_label: "Status", monitor_voice: "Escutar minha voz",
         latency: "Latência", lat_ultra: "Ultra (256)", lat_low: "Baixa (512)", lat_stable: "Estável (1024)",
         refresh_devices: "Atualizar Dispositivos",
@@ -20,6 +20,7 @@ const TEXT = {
         hold_key: "Segurar tecla", levels_section: "Níveis", input_lbl: "Entrada", output_lbl: "Saída",
         gate_open: "● Noise Gate: Aberto", gate_closed: "● Noise Gate: Silenciado",
         dynamics_section: "Dinâmica & Ganho", input_gain: "Ganho de Entrada", noise_gate: "Noise Gate",
+        noise_suppression: "Supressão de Ruído",
         gate_thresh: "Limite do Gate", compressor: "Compressor", comp_thresh: "Limite Compressor", output_vol: "Volume de Saída",
         tab_pitch: "Tom & Vocoder", tab_eq: "Equalizador", tab_mod: "Modulação", tab_fx: "Robô & Distorção",
         tab_space: "Eco & Reverb", tab_mixer: "Mixer", pitch_shift: "Alterar Tom (Pitch)", semitones: "Semitons",
@@ -41,7 +42,7 @@ const TEXT = {
         settings_title: "Configurações", appearance_section: "Aparência", theme_label: "Tema", theme_dark: "Escuro (Dark)",
         theme_oled: "Dark Puro (OLED)", theme_light: "Claro (Light)", language_label: "Idioma", close: "Fechar",
         minimize_window: "Minimizar", maximize_window: "Maximizar", restore_window: "Restaurar",
-        close_window: "Fechar janela",
+        close_window: "Encerrar VoxCraft Studio",
         upd_header: "Atualização do VoxCraft Studio", upd_check_btn: "Verificar",
         no_devices: "Nenhum dispositivo encontrado", audio_starting: "Iniciando áudio…", audio_started: "Áudio ativo",
         devices_refreshed: "Dispositivos atualizados.", core_unavailable: "Core Python indisponível",
@@ -62,7 +63,7 @@ const TEXT = {
         cancel: "Cancel", notice: "Notice",
         preset: "Preset", current_config: "Current configuration", save: "Save", delete: "Delete",
         settings: "Settings", update: "Update", original_voice: "Original Voice",
-        start_audio: "Start Audio", stop_audio: "Stop Audio", audio_section: "Audio", microphone: "Microphone",
+        audio_section: "Audio", microphone: "Microphone",
         output: "Filtered voice destination", status_label: "Status", monitor_voice: "Hear my voice",
         latency: "Latency", lat_ultra: "Ultra (256)", lat_low: "Low (512)", lat_stable: "Stable (1024)",
         refresh_devices: "Refresh Devices",
@@ -72,6 +73,7 @@ const TEXT = {
         hold_key: "Hold key", levels_section: "Levels", input_lbl: "Input", output_lbl: "Output",
         gate_open: "● Noise Gate: Open", gate_closed: "● Noise Gate: Muted",
         dynamics_section: "Dynamics & Gain", input_gain: "Input Gain", noise_gate: "Noise Gate",
+        noise_suppression: "Noise Suppression",
         gate_thresh: "Gate Threshold", compressor: "Compressor", comp_thresh: "Compressor Threshold", output_vol: "Output Volume",
         tab_pitch: "Pitch & Vocoder", tab_eq: "Equalizer", tab_mod: "Modulation", tab_fx: "Robot & Distortion",
         tab_space: "Echo & Reverb", tab_mixer: "Mixer", pitch_shift: "Pitch Shifter", semitones: "Semitones",
@@ -93,7 +95,7 @@ const TEXT = {
         settings_title: "Settings", appearance_section: "Appearance", theme_label: "Theme", theme_dark: "Dark",
         theme_oled: "Pure Dark (OLED)", theme_light: "Light", language_label: "Language", close: "Close",
         minimize_window: "Minimize", maximize_window: "Maximize", restore_window: "Restore",
-        close_window: "Close window",
+        close_window: "Quit VoxCraft Studio",
         upd_header: "VoxCraft Studio Update", upd_check_btn: "Check",
         no_devices: "No devices found", audio_starting: "Starting audio…", audio_started: "Audio active",
         devices_refreshed: "Devices updated.", core_unavailable: "Python core unavailable",
@@ -114,7 +116,7 @@ const TEXT = {
         cancel: "Cancelar", notice: "Aviso",
         preset: "Preset", current_config: "Configuración actual", save: "Guardar", delete: "Eliminar",
         settings: "Configuración", update: "Actualizar", original_voice: "Voz Original",
-        start_audio: "Iniciar Audio", stop_audio: "Detener Audio", audio_section: "Audio", microphone: "Micrófono",
+        audio_section: "Audio", microphone: "Micrófono",
         output: "Destino de la voz filtrada", status_label: "Estado", monitor_voice: "Escuchar mi voz",
         latency: "Latencia", lat_ultra: "Ultra (256)", lat_low: "Baja (512)", lat_stable: "Estable (1024)",
         refresh_devices: "Actualizar Dispositivos",
@@ -124,6 +126,7 @@ const TEXT = {
         hold_key: "Mantener tecla", levels_section: "Niveles", input_lbl: "Entrada", output_lbl: "Salida",
         gate_open: "● Noise Gate: Abierto", gate_closed: "● Noise Gate: Silenciado",
         dynamics_section: "Dinámica y Ganancia", input_gain: "Ganancia de Entrada", noise_gate: "Noise Gate",
+        noise_suppression: "Supresión de ruido",
         gate_thresh: "Umbral del Gate", compressor: "Compresor", comp_thresh: "Umbral del Compresor", output_vol: "Volumen de Salida",
         tab_pitch: "Tono y Vocoder", tab_eq: "Ecualizador", tab_mod: "Modulación", tab_fx: "Robot y Distorsión",
         tab_space: "Eco y Reverb", tab_mixer: "Mezclador", pitch_shift: "Cambiar Tono (Pitch)", semitones: "Semitonos",
@@ -145,7 +148,7 @@ const TEXT = {
         settings_title: "Configuración", appearance_section: "Apariencia", theme_label: "Tema", theme_dark: "Oscuro (Dark)",
         theme_oled: "Dark Puro (OLED)", theme_light: "Claro (Light)", language_label: "Idioma", close: "Cerrar",
         minimize_window: "Minimizar", maximize_window: "Maximizar", restore_window: "Restaurar",
-        close_window: "Cerrar ventana",
+        close_window: "Salir de VoxCraft Studio",
         upd_header: "Actualización de VoxCraft Studio", upd_check_btn: "Verificar",
         no_devices: "No se encontraron dispositivos", audio_starting: "Iniciando audio…", audio_started: "Audio activo",
         devices_refreshed: "Dispositivos actualizados.", core_unavailable: "Core Python no disponible",
@@ -166,6 +169,7 @@ const TEXT = {
 
 const PARAMS_DEFAULT = {
     bypass: false, input_gain_db: 0, output_gain_db: 0, gate_enabled: true, gate_threshold_db: -44,
+    noise_suppression_enabled: true,
     comp_enabled: true, comp_threshold_db: -18, pitch_enabled: false, pitch_semitones: 0, pitch_cents: 0,
     pitch_mix: 1, freq_shift_enabled: false, freq_shift_hz: 0, freq_shift_mix: 1, vocoder_enabled: false,
     vocoder_carrier: "Dente de Serra", vocoder_freq_hz: 110, vocoder_smooth: 0.45, vocoder_mix: 0.85,
@@ -349,6 +353,7 @@ let virtualMicrophoneAvailable = true;
 let pendingParams = {};
 let paramTimer = null;
 let parameterUpdateQueue = Promise.resolve();
+let audioOperationQueue = Promise.resolve();
 let meterBusy = false;
 let captureHotkey = false;
 let hotkey = localStorage.getItem("voxcraft-hotkey") || "F9";
@@ -559,7 +564,9 @@ function applyLanguage(nextLanguage) {
         element.textContent = t(element.dataset.i18n);
     });
     document.querySelectorAll("[data-i18n-label]").forEach((element) => {
-        element.setAttribute("aria-label", t(element.dataset.i18nLabel));
+        const label = t(element.dataset.i18nLabel);
+        element.setAttribute("aria-label", label);
+        element.title = label;
     });
     document.querySelectorAll("[data-label-key]").forEach((element) => {
         element.textContent = t(element.dataset.labelKey);
@@ -580,7 +587,6 @@ function applyLanguage(nextLanguage) {
     document.querySelector("#language-select").value = language;
     document.querySelector("#hotkey-key").setAttribute("aria-description", t("define_key"));
     renderGlobalHotkeyStatus();
-    updateAudioButton();
     updateGateIndicator(true);
 }
 
@@ -598,13 +604,6 @@ function setAudioStatus(message, running = audioRunning, error = false) {
     dot.classList.toggle("is-connected", running);
     dot.classList.toggle("is-error", error);
     document.querySelector("#audio-status-text").textContent = message;
-}
-
-function updateAudioButton() {
-    const button = document.querySelector("#power-button");
-    button.textContent = audioRunning ? t("stop_audio") : t("start_audio");
-    button.classList.toggle("is-running", audioRunning);
-    button.setAttribute("aria-pressed", String(audioRunning));
 }
 
 function updateBypassButton() {
@@ -1078,7 +1077,6 @@ function updateMeters(meter) {
     drawWaveform(meter.waveform);
     if (Boolean(meter.running) !== audioRunning) {
         audioRunning = Boolean(meter.running);
-        updateAudioButton();
         setAudioStatus(audioRunning ? t("audio_started") : t("stopped"), audioRunning);
     }
 }
@@ -1163,17 +1161,17 @@ async function updateMonitor(control) {
 async function refreshDevices() {
     const button = document.querySelector("#refresh-devices");
     button.disabled = true;
-    const wasRunning = audioRunning;
     try {
-        if (wasRunning) {
-            await coreRequest("stop_audio");
-            audioRunning = false;
-            updateAudioButton();
-        }
-        devices = await coreRequest("refresh_devices");
-        renderDevices();
-        setAudioStatus(t("devices_refreshed"), audioRunning);
-        if (wasRunning) await toggleAudio();
+        await enqueueAudioOperation(async () => {
+            if (audioRunning) {
+                await coreRequest("stop_audio");
+                audioRunning = false;
+            }
+            devices = await coreRequest("refresh_devices");
+            renderDevices();
+            setAudioStatus(t("devices_refreshed"), audioRunning);
+            await startAudio();
+        });
     } catch (error) {
         setAudioStatus(String(error), audioRunning, true);
     } finally {
@@ -1194,7 +1192,7 @@ async function configureVirtualOutput() {
         if (setup.available && virtualMicrophoneAvailable
       && devices.outputs.some((device) => device.isVirtualOutput
         && (!virtualOutputSetupSupported || isCableInput(device)))) {
-            setAudioStatus(t("stopped"), false);
+            await ensureAudioRunning();
         } else {
             setAudioStatus(
                 setup.message || (!virtualMicrophoneAvailable
@@ -1303,18 +1301,14 @@ async function deletePreset() {
     }
 }
 
-async function toggleAudio() {
-    const button = document.querySelector("#power-button");
+async function startAudio(restart = false) {
     const monitorControl = document.querySelector("#monitor-enabled");
-    button.disabled = true;
+    if (!coreConnected || (audioRunning && !restart)) return;
     monitorControl.disabled = true;
     try {
         if (audioRunning) {
             await coreRequest("stop_audio");
             audioRunning = false;
-            updateAudioButton();
-            setAudioStatus(t("stopped"), false);
-            return;
         }
 
         updateRoutingFromControls();
@@ -1343,17 +1337,25 @@ async function toggleAudio() {
             monitor_enabled: routing.monitorEnabled,
         });
         audioRunning = Boolean(result.started);
-        updateAudioButton();
         setAudioStatus(result.monitorError || result.message || (audioRunning ? t("audio_started") : t("stopped")),
             audioRunning, !audioRunning || Boolean(result.monitorError));
     } catch (error) {
-        audioRunning = false;
-        updateAudioButton();
-        setAudioStatus(`${t("audio_error")}: ${String(error)}`, false, true);
+        setAudioStatus(`${t("audio_error")}: ${String(error)}`, audioRunning, true);
     } finally {
-        button.disabled = false;
         monitorControl.disabled = false;
     }
+}
+
+function enqueueAudioOperation(operation) {
+    const result = audioOperationQueue.then(operation, operation);
+    audioOperationQueue = result.catch((error) => {
+        setAudioStatus(`${t("audio_error")}: ${String(error)}`, audioRunning, true);
+    });
+    return result;
+}
+
+function ensureAudioRunning(restart = false) {
+    return enqueueAudioOperation(() => startAudio(restart));
 }
 
 function setBypass(enabled) {
@@ -1573,6 +1575,7 @@ function applyStoredThemeAndLanguage() {
 function buildDynamicsControls() {
     const container = document.querySelector("#dynamics-controls");
     container.append(
+        createSwitch("noise_suppression_enabled", "noise_suppression"),
         createSlider(slider("input_gain_db", "input_gain", -18, 24, 0.5, "dB")),
         createSlider(slider("gate_threshold_db", "gate_thresh", -65, -15, 0.5, "dB")),
         createSlider(slider("comp_threshold_db", "comp_thresh", -36, -4, 0.5, "dB")),
@@ -1740,12 +1743,14 @@ function setupEvents() {
     });
     document.querySelector("#save-preset").addEventListener("click", () => void savePreset());
     document.querySelector("#delete-preset").addEventListener("click", () => void deletePreset());
-    document.querySelector("#power-button").addEventListener("click", () => void toggleAudio());
     document.querySelector("#bypass-button").addEventListener("click", () => setBypass(!params.bypass));
     document.querySelector("#refresh-devices").addEventListener("click", () => void refreshDevices());
     document.querySelector("#configure-virtual-output").addEventListener("click", () => void configureVirtualOutput());
     ["input-device", "latency-select"].forEach((id) => {
-        document.querySelector(`#${id}`).addEventListener("change", updateRoutingFromControls);
+        document.querySelector(`#${id}`).addEventListener("change", () => {
+            updateRoutingFromControls();
+            if (coreConnected) void ensureAudioRunning(true);
+        });
     });
     const latencySelect = document.querySelector("#latency-select");
     const savedBlocksize = String(routing.blocksize);
@@ -1763,8 +1768,6 @@ async function connectCore() {
         return;
     }
 
-    const powerButton = document.querySelector("#power-button");
-    powerButton.disabled = true;
     setAudioStatus(t("core_starting"), false);
     try {
         const status = await invoke("get_runtime_status");
@@ -1826,14 +1829,12 @@ async function connectCore() {
                 true,
             );
         } else {
-            setAudioStatus(t("stopped"), false);
+            await ensureAudioRunning();
         }
         window.setInterval(() => void pollMeters(), 180);
     } catch (error) {
         coreConnected = false;
         setAudioStatus(`${t("core_unavailable")}: ${String(error)}`, false, true);
-    } finally {
-        powerButton.disabled = !coreConnected;
     }
 }
 
@@ -1845,7 +1846,6 @@ export function initializeStudio() {
     setupDialogs();
     setupWindowControls(t);
     setupHotkey();
-    updateAudioButton();
     updateBypassButton();
     setupUpdater();
 
