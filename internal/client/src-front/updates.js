@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { check } from "@tauri-apps/plugin-updater";
 
 const isTauriRuntime = () => "__TAURI_INTERNALS__" in window;
@@ -8,6 +8,7 @@ export function setupUpdater() {
   const button = document.querySelector("#check-updates");
   let update = null;
   let isDownloaded = false;
+  let useDnf = false;
   let busy = false;
 
   const setAction = (label, action) => {
@@ -47,6 +48,7 @@ export function setupUpdater() {
         return;
       }
 
+      useDnf = target.endsWith("-rpm") && await invoke("rpm_update_uses_dnf");
       update = await check({ target });
       isDownloaded = false;
 
@@ -57,7 +59,7 @@ export function setupUpdater() {
       }
 
       status.textContent = `A versão ${update.version} está disponível.`;
-      setAction(`Baixar atualização ${update.version}`, "install");
+      setAction(`Baixar atualização ${update.version}`, "download");
     } catch (error) {
       status.textContent = `Não foi possível verificar atualizações: ${String(error)}`;
       setAction("Tentar novamente", "check");
@@ -67,19 +69,24 @@ export function setupUpdater() {
     }
   }
 
-  async function installUpdate() {
+  async function downloadUpdate() {
     if (busy || !update) return;
 
     busy = true;
     button.disabled = true;
 
     try {
-      if (!isDownloaded) {
-        let downloaded = 0;
-        let contentLength = 0;
-        status.textContent = `Baixando a versão ${update.version}…`;
-        setAction("Baixando…", "install");
+      let downloaded = 0;
+      let contentLength = 0;
+      status.textContent = `Baixando a versão ${update.version}…`;
+      setAction("Baixando…", "download");
 
+      if (useDnf) {
+        const progress = new Channel((percent) => {
+          status.textContent = `Baixando a atualização (${percent}%)…`;
+        });
+        await invoke("download_rpm_update", { version: update.version, progress });
+      } else {
         await update.download((event) => {
           if (event.event === "Started") {
             contentLength = event.data.contentLength ?? 0;
@@ -91,26 +98,37 @@ export function setupUpdater() {
             status.textContent = `Baixando a atualização${percent}…`;
           }
         });
-        isDownloaded = true;
       }
+      isDownloaded = true;
+      status.textContent = `A versão ${update.version} foi baixada. Você pode instalar e reiniciar agora ou fechar para instalar depois.`;
+      setAction("Instalar e reiniciar", "install");
+    } catch (error) {
+      status.textContent = `Não foi possível baixar a atualização: ${String(error)}`;
+      setAction("Tentar baixar novamente", "download");
+    } finally {
+      busy = false;
+      button.disabled = false;
+    }
+  }
 
-      const confirmed = window.confirm(
-        `A versão ${update.version} foi baixada. Deseja instalar e reiniciar o VoxCraft Studio agora?`,
-      );
-      if (!confirmed) {
-        status.textContent = "Atualização baixada; instalação adiada.";
-        setAction(`Instalar ${update.version}`, "install");
-        return;
-      }
+  async function installUpdate() {
+    if (busy || !update || !isDownloaded) return;
 
+    busy = true;
+    button.disabled = true;
+    try {
       status.textContent = "Instalando a atualização…";
       setAction("Instalando…", "install");
-      await update.install();
+      if (useDnf) {
+        await invoke("install_rpm_update", { version: update.version });
+      } else {
+        await update.install();
+      }
       status.textContent = "Atualização instalada. Reiniciando…";
       await invoke("restart_app");
     } catch (error) {
       status.textContent = `Não foi possível instalar a atualização: ${String(error)}`;
-      setAction("Tentar novamente", update ? "install" : "check");
+      setAction("Tentar instalar novamente", "install");
     } finally {
       busy = false;
       button.disabled = false;
@@ -120,6 +138,8 @@ export function setupUpdater() {
   button.addEventListener("click", () => {
     if (button.dataset.action === "install") {
       void installUpdate();
+    } else if (button.dataset.action === "download") {
+      void downloadUpdate();
     } else {
       void checkForUpdates();
     }

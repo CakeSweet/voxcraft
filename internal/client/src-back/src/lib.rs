@@ -553,6 +553,125 @@ fn updater_target() -> Option<String> {
     }
 }
 
+#[cfg(target_os = "linux")]
+const DNF: &str = "/usr/bin/dnf";
+#[cfg(target_os = "linux")]
+const PKEXEC: &str = "/usr/bin/pkexec";
+
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct RpmUpdateState(tokio::sync::Mutex<Option<(String, Arc<Vec<u8>>)>>);
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+fn rpm_update_uses_dnf() -> bool {
+    use tauri::utils::{config::BundleType, platform::bundle_type};
+    matches!(bundle_type(), Some(BundleType::Rpm)) && std::path::Path::new(DNF).is_file()
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+async fn download_rpm_update(
+    app: tauri::AppHandle,
+    state: State<'_, RpmUpdateState>,
+    version: String,
+    progress: tauri::ipc::Channel<u64>,
+) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    if !updater_is_configured() || !rpm_update_uses_dnf() {
+        return Err("Atualização RPM via DNF não está disponível.".into());
+    }
+    let mut staged = state.0.lock().await;
+    *staged = None;
+    let target = updater_target().ok_or("Formato de atualização indisponível.")?;
+    let update = app
+        .updater_builder()
+        .target(target)
+        .build()
+        .map_err(|error| error.to_string())?
+        .check()
+        .await
+        .map_err(|error| error.to_string())?
+        .filter(|update| update.version == version)
+        .ok_or("A versão disponível mudou. Verifique novamente.")?;
+
+    let mut downloaded = 0u64;
+    let mut last_percent = 0;
+    // The plugin verifies the release signature before returning the bytes.
+    let bytes = update
+        .download(
+            |chunk, total| {
+                downloaded += chunk as u64;
+                if let Some(total) = total.filter(|&total| total > 0) {
+                    let percent = (downloaded.saturating_mul(100) / total).min(100);
+                    if percent != last_percent {
+                        let _ = progress.send(percent);
+                        last_percent = percent;
+                    }
+                }
+            },
+            || {},
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    if !bytes.starts_with(&[0xed, 0xab, 0xee, 0xdb]) {
+        return Err("O arquivo assinado não é um pacote RPM.".into());
+    }
+    *staged = Some((version, Arc::new(bytes)));
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+async fn install_rpm_update(
+    state: State<'_, RpmUpdateState>,
+    version: String,
+) -> Result<(), String> {
+    if !rpm_update_uses_dnf() {
+        return Err("Atualização RPM via DNF não está disponível.".into());
+    }
+    let mut staged = state.0.lock().await;
+    let (_, bytes) = staged
+        .as_ref()
+        .filter(|(downloaded_version, _)| downloaded_version == &version)
+        .ok_or("Baixe a atualização antes de instalar.")?;
+    let bytes = Arc::clone(bytes);
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let package = directory.path().join("voxcraft-update.rpm");
+        std::fs::write(&package, bytes.as_slice()).map_err(|error| error.to_string())?;
+        let output = Command::new(PKEXEC)
+            .arg(DNF)
+            .args(["install", "-y"])
+            .arg(package)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|error| format!("Não foi possível iniciar o instalador DNF: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        if output.status.code() == Some(126) {
+            return Err("Autorização do sistema cancelada.".into());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
+        Err(format!(
+            "O instalador DNF falhou ({}): {}",
+            output.status, detail
+        ))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    *staged = None;
+    Ok(())
+}
+
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) {
     app.restart();
@@ -621,6 +740,12 @@ pub fn run() {
             is_wayland_session,
             set_wayland_global_shortcut,
             updater_target,
+            #[cfg(target_os = "linux")]
+            rpm_update_uses_dnf,
+            #[cfg(target_os = "linux")]
+            download_rpm_update,
+            #[cfg(target_os = "linux")]
+            install_rpm_update,
             restart_app
         ])
         .setup(|app| {
@@ -630,6 +755,8 @@ pub fn run() {
             app.manage(core);
             #[cfg(target_os = "linux")]
             app.manage(PortalShortcutState::default());
+            #[cfg(target_os = "linux")]
+            app.manage(RpmUpdateState::default());
             setup_tray(app)?;
             Ok(())
         });

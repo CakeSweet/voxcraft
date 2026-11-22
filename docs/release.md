@@ -43,6 +43,14 @@ consecutivas: instale a mais antiga, abra o app, confirme a atualização e
 verifique que o core conecta na versão nova. No Linux, o instalador pode pedir
 autorização do sistema.
 
+No Fedora, o VoxCraft verifica o download com a chave já configurada do Tauri
+e instala o `.rpm` via DNF, respeitando a política do gerenciador de pacotes.
+Quem estiver numa versão anterior que ainda chama `rpm -U` e não consegue
+atualizar deve instalar a versão corrigida uma vez com `sudo dnf install
+./<pacote>.rpm`. Isso não exige desinstalar a versão anterior. Para validar
+o novo fluxo automático, atualize pelo app a partir de uma versão que já
+use DNF e confirme que, depois de reiniciar, ela não oferece a mesma atualização.
+
 ## Build local
 
 Com as dependências de `python scripts/install.py` instaladas, instale também
