@@ -87,10 +87,11 @@ Original Voice bypasses effects but keeps the configured gains.
 
 ## Routing to Discord & Games
 
-On Windows, use [VB-Audio Virtual Cable](https://vb-audio.com/Cable).
-On Linux, VoxCraft creates a virtual sink automatically when needed and when
-PipeWire/PulseAudio is available through `pactl`. Select the sink's monitor
-source as the input in Discord or the receiving app.
+On Windows, use [VB-Audio Virtual Cable](https://vb-audio.com/Cable) and select
+`CABLE Output (VB-Audio Virtual Cable)` as the microphone in the receiving app.
+On Linux, VoxCraft creates a virtual audio route and exposes its recording
+source as `voxcraft-output`. Select `voxcraft-output` as the microphone input
+in Discord or the receiving app.
 
 **Windows example:**
 
@@ -217,10 +218,9 @@ em Configurações. Voz Original ignora os efeitos, mas mantém os ganhos config
 ## Configuração no Discord e Jogos
 
 No Windows, use o [VB-Audio Virtual Cable](https://vb-audio.com/Cable).
-No Linux, o VoxCraft cria um sink virtual automaticamente quando necessário e
-quando PipeWire/PulseAudio está disponível via `pactl`. No Discord ou no
-aplicativo que recebe o áudio, selecione a fonte de monitoramento desse sink
-como entrada.
+No Linux, o VoxCraft cria uma rota de áudio virtual e expõe a fonte de gravação
+com o nome `voxcraft-output`. No Discord ou no aplicativo que recebe o áudio,
+selecione `voxcraft-output` como microfone.
 
 **Exemplo no Windows:**
 

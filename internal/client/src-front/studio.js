@@ -9,7 +9,7 @@ const TEXT = {
     preset: "Preset", current_config: "Configuração atual", save: "Salvar", delete: "Excluir",
     settings: "Configurações", update: "Atualizar", original_voice: "Voz Original",
     start_audio: "Iniciar Áudio", stop_audio: "Parar Áudio", audio_section: "Áudio", microphone: "Microfone",
-    output: "Saída virtual", status_label: "Status", monitor_voice: "Escutar minha voz",
+    output: "Destino da voz filtrada", status_label: "Status", monitor_voice: "Escutar minha voz",
     latency: "Latência", lat_ultra: "Ultra (256)", lat_low: "Baixa (512)", lat_stable: "Estável (1024)",
     refresh_devices: "Atualizar Dispositivos",
     loading_devices: "Listando dispositivos…", stopped: "Parado", hotkey_section: "Atalho", enable_hotkey: "Ativar atalho",
@@ -51,17 +51,19 @@ const TEXT = {
     audio_error: "Erro ao iniciar o áudio", key_capture: "Pressione a combinação… (Esc cancela)",
     reset_confirm: "Restaurar todos os efeitos para o preset Normal?", current_audio: "Configuração atual",
     start_required_devices: "Selecione uma entrada de áudio.",
-    no_virtual_output: "Nenhuma saída virtual detectada",
-    virtual_output_required: "A saída virtual obrigatória não está disponível. O áudio não pode ser iniciado.",
-    configure_virtual_output: "Configurar saída virtual",
-    virtual_output_setup_failed: "Não foi possível configurar a saída virtual automaticamente.",
+    no_virtual_output: "Nenhum destino virtual detectado",
+    virtual_output_required: "O destino virtual da voz filtrada não está disponível. O áudio não pode ser iniciado.",
+    configure_virtual_output: "Configurar microfone virtual",
+    virtual_output_setup_failed: "Não foi possível configurar a rota de áudio virtual automaticamente.",
+    virtual_microphone_hint: "No Discord/jogos, selecione “voxcraft-output” (Linux) ou “CABLE Output (VB-Audio Virtual Cable)” (Windows) como microfone.",
+    virtual_microphone_setup_failed: "O microfone virtual voxcraft-output não está disponível. O áudio não pode ser iniciado.",
   },
   en: {
     cancel: "Cancel", notice: "Notice",
     preset: "Preset", current_config: "Current configuration", save: "Save", delete: "Delete",
     settings: "Settings", update: "Update", original_voice: "Original Voice",
     start_audio: "Start Audio", stop_audio: "Stop Audio", audio_section: "Audio", microphone: "Microphone",
-    output: "Virtual output", status_label: "Status", monitor_voice: "Hear my voice",
+    output: "Filtered voice destination", status_label: "Status", monitor_voice: "Hear my voice",
     latency: "Latency", lat_ultra: "Ultra (256)", lat_low: "Low (512)", lat_stable: "Stable (1024)",
     refresh_devices: "Refresh Devices",
     loading_devices: "Listing devices…", stopped: "Stopped", hotkey_section: "Hotkey", enable_hotkey: "Enable hotkey",
@@ -104,16 +106,18 @@ const TEXT = {
     reset_confirm: "Reset all effects to the Normal preset?", current_audio: "Current configuration",
     start_required_devices: "Select an input device.",
     no_virtual_output: "No virtual output detected",
-    virtual_output_required: "The required virtual output is unavailable. Audio cannot be started.",
-    configure_virtual_output: "Configure virtual output",
-    virtual_output_setup_failed: "Could not configure the virtual output automatically.",
+    virtual_output_required: "The virtual destination for processed voice is unavailable. Audio cannot start.",
+    configure_virtual_output: "Configure virtual microphone",
+    virtual_output_setup_failed: "Could not configure the virtual audio route automatically.",
+    virtual_microphone_hint: "In Discord/games, select “voxcraft-output” (Linux) or “CABLE Output (VB-Audio Virtual Cable)” (Windows) as your microphone.",
+    virtual_microphone_setup_failed: "The voxcraft-output virtual microphone is unavailable. Audio cannot start.",
   },
   es: {
     cancel: "Cancelar", notice: "Aviso",
     preset: "Preset", current_config: "Configuración actual", save: "Guardar", delete: "Eliminar",
     settings: "Configuración", update: "Actualizar", original_voice: "Voz Original",
     start_audio: "Iniciar Audio", stop_audio: "Detener Audio", audio_section: "Audio", microphone: "Micrófono",
-    output: "Salida virtual", status_label: "Estado", monitor_voice: "Escuchar mi voz",
+    output: "Destino de la voz filtrada", status_label: "Estado", monitor_voice: "Escuchar mi voz",
     latency: "Latencia", lat_ultra: "Ultra (256)", lat_low: "Baja (512)", lat_stable: "Estable (1024)",
     refresh_devices: "Actualizar Dispositivos",
     loading_devices: "Listando dispositivos…", stopped: "Detenido", hotkey_section: "Atajo", enable_hotkey: "Activar atajo",
@@ -156,9 +160,11 @@ const TEXT = {
     reset_confirm: "¿Restablecer todos los efectos al preset Normal?", current_audio: "Configuración actual",
     start_required_devices: "Selecciona una entrada de audio.",
     no_virtual_output: "No se detectó una salida virtual",
-    virtual_output_required: "La salida virtual obligatoria no está disponible. No se puede iniciar el audio.",
-    configure_virtual_output: "Configurar salida virtual",
-    virtual_output_setup_failed: "No se pudo configurar automáticamente la salida virtual.",
+    virtual_output_required: "El destino virtual de la voz procesada no está disponible. No se puede iniciar el audio.",
+    configure_virtual_output: "Configurar micrófono virtual",
+    virtual_output_setup_failed: "No se pudo configurar automáticamente la ruta de audio virtual.",
+    virtual_microphone_hint: "En Discord/juegos, selecciona “voxcraft-output” (Linux) o “CABLE Output (VB-Audio Virtual Cable)” (Windows) como micrófono.",
+    virtual_microphone_setup_failed: "El micrófono virtual voxcraft-output no está disponible. No se puede iniciar el audio.",
   },
 };
 
@@ -343,6 +349,7 @@ let devices = { inputs: [], outputs: [] };
 let routing = readStoredRouting();
 let virtualOutputSetupSupported = false;
 let virtualOutputSetupCanRetry = false;
+let virtualMicrophoneAvailable = true;
 let pendingParams = {};
 let paramTimer = null;
 let parameterUpdateQueue = Promise.resolve();
@@ -1110,11 +1117,18 @@ function fillDeviceSelect(select, items, savedIndex, emptyLabel = "no_devices") 
   select.value = String(saved?.index ?? items[0].index);
 }
 
+function isVoxCraftVirtualOutput(device) {
+  return String(device?.name || "").toLowerCase().replace(/[^a-z0-9]/g, "")
+    === "voxcraftvirtualoutput";
+}
+
 function renderDevices() {
   fillDeviceSelect(document.querySelector("#input-device"), devices.inputs, routing.inputIndex);
-  const virtualOutputs = devices.outputs.filter((device) => device.isVirtualOutput);
+  const virtualOutputs = devices.outputs.filter((device) => device.isVirtualOutput
+    && (!virtualOutputSetupSupported || isVoxCraftVirtualOutput(device)));
   document.querySelector("#configure-virtual-output").hidden =
-    !virtualOutputSetupSupported || !virtualOutputSetupCanRetry || virtualOutputs.length > 0;
+    !virtualOutputSetupSupported || !virtualOutputSetupCanRetry
+    || (virtualOutputs.length > 0 && virtualMicrophoneAvailable);
   const savedOutputExists = virtualOutputs.some(
     (device) => String(device.index) === String(routing.outputIndex),
   );
@@ -1185,12 +1199,21 @@ async function configureVirtualOutput() {
     const setup = await coreRequest("ensure_virtual_output");
     virtualOutputSetupSupported = setup.supported === true;
     virtualOutputSetupCanRetry = setup.canRetry === true;
+    virtualMicrophoneAvailable = setup.microphoneAvailable !== false;
     devices = await coreRequest("list_devices");
     renderDevices();
-    if (setup.available && devices.outputs.some((device) => device.isVirtualOutput)) {
+    if (setup.available && virtualMicrophoneAvailable
+      && devices.outputs.some((device) => device.isVirtualOutput
+        && (!virtualOutputSetupSupported || isVoxCraftVirtualOutput(device)))) {
       setAudioStatus(t("stopped"), false);
     } else {
-      setAudioStatus(setup.message || t("virtual_output_setup_failed"), false, true);
+      setAudioStatus(
+        setup.message || (!virtualMicrophoneAvailable
+          ? t("virtual_microphone_setup_failed")
+          : t("virtual_output_setup_failed")),
+        false,
+        true,
+      );
     }
   } catch (error) {
     setAudioStatus(String(error), false, true);
@@ -1308,13 +1331,17 @@ async function toggleAudio() {
     updateRoutingFromControls();
     const inputIndex = Number(routing.inputIndex);
     const outputIndex = Number(routing.outputIndex);
+    if (virtualOutputSetupSupported && !virtualMicrophoneAvailable) {
+      setAudioStatus(t("virtual_microphone_setup_failed"), false, true);
+      return;
+    }
     if (routing.inputIndex === "" || !Number.isInteger(inputIndex)) {
       setAudioStatus(t("start_required_devices"), false, true);
       return;
     }
-    const virtualOutput = devices.outputs.some(
-      (device) => device.isVirtualOutput && device.index === outputIndex,
-    );
+    const virtualOutput = devices.outputs.some((device) => device.isVirtualOutput
+      && device.index === outputIndex
+      && (!virtualOutputSetupSupported || isVoxCraftVirtualOutput(device)));
     if (!virtualOutput) {
       setAudioStatus(t("virtual_output_required"), false, true);
       return;
@@ -1827,6 +1854,7 @@ async function connectCore() {
     let virtualOutputSetup = {
       supported: false,
       available: false,
+      microphoneAvailable: true,
       created: false,
       canRetry: false,
       message: null,
@@ -1838,6 +1866,7 @@ async function connectCore() {
     }
     virtualOutputSetupSupported = virtualOutputSetup.supported === true;
     virtualOutputSetupCanRetry = virtualOutputSetup.canRetry === true;
+    virtualMicrophoneAvailable = virtualOutputSetup.microphoneAvailable !== false;
     const deviceList = await coreRequest("list_devices");
     const saved = readStoredVoiceSettings();
     const savedParams = Object.fromEntries(Object.entries(loadedParams).flatMap(([key, fallback]) => {
@@ -1862,8 +1891,15 @@ async function connectCore() {
     renderPresets();
     renderDevices();
     renderControlValues();
-    if (virtualOutputSetup.supported && !virtualOutputSetup.available) {
-      setAudioStatus(virtualOutputSetup.message || t("virtual_output_setup_failed"), false, true);
+    if (virtualOutputSetup.supported
+      && (!virtualOutputSetup.available || !virtualMicrophoneAvailable)) {
+      setAudioStatus(
+        virtualOutputSetup.message || (!virtualMicrophoneAvailable
+          ? t("virtual_microphone_setup_failed")
+          : t("virtual_output_setup_failed")),
+        false,
+        true,
+      );
     } else {
       setAudioStatus(t("stopped"), false);
     }

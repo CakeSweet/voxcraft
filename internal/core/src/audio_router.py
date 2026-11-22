@@ -115,6 +115,8 @@ _VIRTUAL_OUTPUT_MARKERS = (
 )
 _VOXCRAFT_VIRTUAL_SINK_NAME = "voxcraft_virtual_output"
 _VOXCRAFT_VIRTUAL_SINK_DESCRIPTION = "VoxCraft_Virtual_Output"
+_VOXCRAFT_MICROPHONE_SOURCE_NAME = "voxcraft_output"
+_VOXCRAFT_MICROPHONE_DESCRIPTION = "voxcraft-output"
 
 _GENERIC_DEV_WORDS = {
     "microfone",
@@ -146,6 +148,16 @@ def _is_virtual_output_name(name: str) -> bool:
         "".join(ch if ch.isalnum() else " " for ch in name.casefold()).split()
     )
     return any(marker in normalized for marker in _VIRTUAL_OUTPUT_MARKERS)
+
+
+def _is_voxcraft_virtual_sink_name(name: str) -> bool:
+    normalized = "".join(ch for ch in name.casefold() if ch.isalnum())
+    return normalized == "voxcraftvirtualoutput"
+
+
+def _is_voxcraft_virtual_microphone_name(name: str) -> bool:
+    normalized = "".join(ch for ch in name.casefold() if ch.isalnum())
+    return normalized == "voxcraftoutput"
 
 
 def _short_hostapi(api_name: str) -> str:
@@ -273,6 +285,12 @@ def _desktop_devices(
     if not sys.platform.startswith("linux"):
         return devices
 
+    if is_input:
+        devices = [
+            device
+            for device in devices
+            if not _is_voxcraft_virtual_microphone_name(device.name)
+        ]
     endpoints = _linux_sound_endpoints("sources" if is_input else "sinks")
     if endpoints is None:
         return devices
@@ -285,7 +303,10 @@ def _desktop_devices(
     unmatched = False
     for endpoint in endpoints:
         name = endpoint["name"]
-        if is_input and name.endswith(".monitor"):
+        if is_input and (
+            name.endswith(".monitor")
+            or _is_voxcraft_virtual_microphone_name(name)
+        ):
             continue
         description = endpoint.get("description") or name
         device = by_name.get(name.casefold()) or by_name.get(description.strip().casefold())
@@ -323,6 +344,7 @@ class AudioRouter:
         self.last_used_in_idx: int | None = None
         self.last_used_out_idx: int | None = None
         self._virtual_output_module_id: str | None = None
+        self._virtual_microphone_module_id: str | None = None
 
     def abort_start(self):
         self._abort_event.set()
@@ -366,10 +388,12 @@ class AudioRouter:
     def is_virtual_output(index: int) -> bool:
         try:
             device = sd.query_devices(index)
-            return (
-                int(device.get("max_output_channels", 0)) > 0
-                and _is_virtual_output_name(str(device.get("name", "")))
-            )
+            name = str(device.get("name", ""))
+            if int(device.get("max_output_channels", 0)) <= 0:
+                return False
+            if sys.platform.startswith("linux"):
+                return _is_voxcraft_virtual_sink_name(name)
+            return _is_virtual_output_name(name)
         except (IndexError, TypeError, ValueError, sd.PortAudioError):
             return False
 
@@ -384,131 +408,257 @@ class AudioRouter:
         return AudioRouter.list_devices()
 
     def ensure_linux_virtual_output(self) -> dict[str, Any]:
-        """Create a session-scoped virtual sink when Linux has no recognized one."""
+        """Ensure a virtual output and a named source for the processed microphone."""
         if not sys.platform.startswith("linux"):
             return {
                 "supported": False,
                 "available": False,
+                "microphoneAvailable": None,
                 "created": False,
                 "canRetry": False,
                 "message": None,
             }
 
-        module_id = self._find_voxcraft_virtual_sink_module()
-        if module_id is not None:
-            self._virtual_output_module_id = module_id
-
+        # Keep module IDs only for modules loaded by this router. Existing
+        # VoxCraft endpoints may belong to another running app instance.
         _, outputs = self.refresh_backend()
-        if any(device.is_virtual_output for device in outputs):
+        virtual_outputs = [
+            device
+            for device in outputs
+            if device.is_virtual_output
+            and _is_voxcraft_virtual_sink_name(device.name)
+        ]
+        created = False
+        if not virtual_outputs:
+            sink_endpoints = _linux_sound_endpoints("sinks")
+            if sink_endpoints is None:
+                return {
+                    "supported": True,
+                    "available": False,
+                    "microphoneAvailable": False,
+                    "created": False,
+                    "canRetry": True,
+                    "message": (
+                        "Não foi possível acessar o PipeWire/PulseAudio pelo pactl. "
+                        "Verifique se o servidor de áudio da sessão está ativo."
+                    ),
+                }
+
+            server_has_voxcraft_sink = any(
+                _is_voxcraft_virtual_sink_name(str(endpoint.get("name", "")))
+                or _is_voxcraft_virtual_sink_name(
+                    str(endpoint.get("description", ""))
+                )
+                for endpoint in sink_endpoints
+            )
+            if server_has_voxcraft_sink:
+                return {
+                    "supported": True,
+                    "available": False,
+                    "microphoneAvailable": False,
+                    "created": False,
+                    "canRetry": False,
+                    "message": (
+                        "O servidor de áudio tem a rota VoxCraft, mas o PortAudio "
+                        "não a disponibilizou. Atualize os dispositivos ou confira "
+                        "a integração PipeWire/PulseAudio."
+                    ),
+                }
+
+            try:
+                result = _run_pactl(
+                    [
+                        "load-module",
+                        "module-null-sink",
+                        f"sink_name={_VOXCRAFT_VIRTUAL_SINK_NAME}",
+                        f"sink_properties=device.description={_VOXCRAFT_VIRTUAL_SINK_DESCRIPTION}",
+                    ],
+                    timeout=5,
+                )
+                module_id = result.stdout.strip()
+                if not module_id.isdigit():
+                    raise RuntimeError("o pactl não retornou o identificador do módulo.")
+                self._virtual_output_module_id = module_id
+                created = True
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                detail = (
+                    exc.stderr.strip()
+                    if isinstance(exc, subprocess.CalledProcessError) and exc.stderr
+                    else str(exc).strip()
+                )
+                return {
+                    "supported": True,
+                    "available": False,
+                    "microphoneAvailable": False,
+                    "created": False,
+                    "canRetry": True,
+                    "message": (
+                        "Não foi possível criar a rota de áudio virtual no "
+                        "PipeWire/PulseAudio" + (f": {detail}" if detail else ".")
+                    ),
+                }
+
+            _, outputs = self.refresh_backend()
+            virtual_outputs = [
+                device
+                for device in outputs
+                if device.is_virtual_output
+                and _is_voxcraft_virtual_sink_name(device.name)
+            ]
+
+        if not virtual_outputs:
+            return {
+                "supported": True,
+                "available": False,
+                "microphoneAvailable": False,
+                "created": created,
+                "canRetry": False,
+                "message": (
+                    "A rota virtual foi criada, mas o PortAudio não a disponibilizou "
+                    "ao VoxCraft. Confira a integração PipeWire/PulseAudio."
+                ),
+            }
+
+        sink_endpoints = _linux_sound_endpoints("sinks")
+        if sink_endpoints is None:
             return {
                 "supported": True,
                 "available": True,
-                "created": False,
-                "canRetry": False,
-                "message": None,
-            }
-
-        endpoints = _linux_sound_endpoints("sinks")
-        if endpoints is None:
-            return {
-                "supported": True,
-                "available": False,
-                "created": False,
+                "microphoneAvailable": False,
+                "created": created,
                 "canRetry": True,
                 "message": (
-                    "Não foi possível acessar o PipeWire/PulseAudio pelo pactl. "
-                    "Verifique se o servidor de áudio da sessão está ativo."
+                    "Não foi possível localizar a saída virtual no PipeWire/PulseAudio "
+                    "para criar o microfone voxcraft-output."
                 ),
             }
 
-        server_has_virtual_sink = any(
-            _is_virtual_output_name(
-                f"{endpoint.get('name', '')} {endpoint.get('description', '')}"
-            )
-            for endpoint in endpoints
+        selected_output = virtual_outputs[0]
+        sink_name = self._linux_sink_name(selected_output, sink_endpoints)
+        if sink_name is None:
+            return {
+                "supported": True,
+                "available": True,
+                "microphoneAvailable": False,
+                "created": created,
+                "canRetry": False,
+                "message": (
+                    "Não foi possível associar a saída virtual selecionada ao "
+                    "PipeWire/PulseAudio."
+                ),
+            }
+
+        monitor_source = f"{sink_name}.monitor"
+        source_endpoints = _linux_sound_endpoints("sources")
+        if source_endpoints is None or not any(
+            endpoint["name"] == monitor_source for endpoint in source_endpoints
+        ):
+            return {
+                "supported": True,
+                "available": True,
+                "microphoneAvailable": False,
+                "created": created,
+                "canRetry": True,
+                "message": (
+                    "A saída virtual não disponibilizou uma fonte de captura para "
+                    "o microfone voxcraft-output."
+                ),
+            }
+
+        microphone_exists = any(
+            endpoint["name"] == _VOXCRAFT_MICROPHONE_SOURCE_NAME
+            for endpoint in source_endpoints
         )
-        if server_has_virtual_sink:
-            return {
-                "supported": True,
-                "available": False,
-                "created": False,
-                "canRetry": False,
-                "message": (
-                    "O servidor de áudio tem uma saída virtual, mas o PortAudio "
-                    "não a disponibilizou ao VoxCraft. Atualize os dispositivos "
-                    "ou confira a integração PipeWire/PulseAudio."
-                ),
-            }
+        microphone_created = False
+        if not microphone_exists:
+            try:
+                result = _run_pactl(
+                    [
+                        "load-module",
+                        "module-remap-source",
+                        f"source_name={_VOXCRAFT_MICROPHONE_SOURCE_NAME}",
+                        f"master={monitor_source}",
+                        (
+                            "source_properties=device.description="
+                            f'"{_VOXCRAFT_MICROPHONE_DESCRIPTION}"'
+                        ),
+                    ],
+                    timeout=5,
+                )
+                module_id = result.stdout.strip()
+                if not module_id.isdigit():
+                    raise RuntimeError("o pactl não retornou o identificador do módulo.")
+                self._virtual_microphone_module_id = module_id
+                microphone_created = True
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                detail = (
+                    exc.stderr.strip()
+                    if isinstance(exc, subprocess.CalledProcessError) and exc.stderr
+                    else str(exc).strip()
+                )
+                return {
+                    "supported": True,
+                    "available": True,
+                    "microphoneAvailable": False,
+                    "created": created,
+                    "microphoneCreated": False,
+                    "canRetry": True,
+                    "message": (
+                        "Não foi possível criar o microfone voxcraft-output"
+                        + (f": {detail}" if detail else ".")
+                    ),
+                }
 
-        try:
-            result = _run_pactl(
-                [
-                    "load-module",
-                    "module-null-sink",
-                    f"sink_name={_VOXCRAFT_VIRTUAL_SINK_NAME}",
-                    f"sink_properties=device.description={_VOXCRAFT_VIRTUAL_SINK_DESCRIPTION}",
-                ],
-                timeout=5,
+            source_endpoints = _linux_sound_endpoints("sources") or []
+            microphone_exists = any(
+                endpoint["name"] == _VOXCRAFT_MICROPHONE_SOURCE_NAME
+                for endpoint in source_endpoints
             )
-            module_id = result.stdout.strip()
-            if not module_id.isdigit():
-                raise RuntimeError("o pactl não retornou o identificador do módulo.")
-            self._virtual_output_module_id = module_id
-        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-            detail = (
-                exc.stderr.strip()
-                if isinstance(exc, subprocess.CalledProcessError) and exc.stderr
-                else str(exc).strip()
-            )
-            return {
-                "supported": True,
-                "available": False,
-                "created": False,
-                "canRetry": True,
-                "message": (
-                    "Não foi possível criar a saída virtual no PipeWire/PulseAudio"
-                    + (f": {detail}" if detail else ".")
-                ),
-            }
-
-        _, outputs = self.refresh_backend()
-        available = any(device.is_virtual_output for device in outputs)
+        microphone_available = microphone_exists
         return {
             "supported": True,
-            "available": available,
-            "created": True,
+            "available": True,
+            "microphoneAvailable": microphone_available,
+            "created": created,
+            "microphoneCreated": microphone_created,
             "canRetry": False,
-            "message": None if available else (
-                "A saída virtual foi criada, mas o PortAudio não a disponibilizou "
-                "ao VoxCraft. Confira a integração PipeWire/PulseAudio."
+            "message": None if microphone_available else (
+                "O microfone voxcraft-output não apareceu no PipeWire/PulseAudio."
             ),
         }
 
     @staticmethod
-    def _find_voxcraft_virtual_sink_module() -> str | None:
-        try:
-            result = _run_pactl(["list", "short", "modules"])
-        except (OSError, subprocess.SubprocessError):
-            return None
-        for line in result.stdout.splitlines():
-            fields = line.split("\t", 2)
-            if (
-                len(fields) == 3
-                and fields[1] == "module-null-sink"
-                and f"sink_name={_VOXCRAFT_VIRTUAL_SINK_NAME}" in fields[2]
-                and fields[0].isdigit()
-            ):
-                return fields[0]
+    def _linux_sink_name(
+        device: AudioDeviceItem,
+        endpoints: list[dict[str, Any]],
+    ) -> str | None:
+        device_name = device.name.strip().casefold()
+        for endpoint in endpoints:
+            name = endpoint.get("name")
+            description = endpoint.get("description")
+            if not isinstance(name, str):
+                continue
+            candidates = {name.strip().casefold()}
+            if isinstance(description, str):
+                candidates.add(description.strip().casefold())
+            if device_name in candidates:
+                return name
         return None
 
     def release_linux_virtual_output(self) -> None:
-        module_id, self._virtual_output_module_id = self._virtual_output_module_id, None
-        if module_id is None:
-            return
-        try:
-            _run_pactl(["unload-module", module_id])
-        except (OSError, subprocess.SubprocessError):
-            pass
+        module_ids = (
+            self._virtual_microphone_module_id,
+            self._virtual_output_module_id,
+        )
+        self._virtual_microphone_module_id = None
+        self._virtual_output_module_id = None
+        for module_id in module_ids:
+            if module_id is None:
+                continue
+            try:
+                _run_pactl(["unload-module", module_id])
+            except (OSError, subprocess.SubprocessError):
+                pass
 
     @staticmethod
     def _candidate_rates(dev_info: dict, preferred: list[int] | None = None) -> list[int]:
