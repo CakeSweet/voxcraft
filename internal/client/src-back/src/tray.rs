@@ -12,7 +12,7 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
-pub(super) fn setup(app: &tauri::App) -> tauri::Result<()> {
+pub(super) fn setup(app: &tauri::AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Abrir", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;

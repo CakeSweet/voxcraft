@@ -18,11 +18,30 @@ pub(crate) fn set_autostart_enabled(enabled: bool) -> Result<AutostartState, Str
     platform::set_enabled(enabled)
 }
 
+pub(crate) fn refresh_if_enabled() {
+    platform::refresh_if_enabled();
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn extract_command_executable(command: &str) -> &str {
+    let trimmed = command.trim();
+    if let Some(rest) = trimmed.strip_prefix('"') {
+        return rest.split('"').next().unwrap_or("").trim();
+    }
+    trimmed.split_whitespace().next().unwrap_or("")
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn clean_windows_path(raw: &str) -> &str {
+    raw.strip_prefix(r"\\?\").unwrap_or(raw)
+}
+
 #[cfg(target_os = "windows")]
 mod platform {
-    use super::AutostartState;
+    use super::{clean_windows_path, extract_command_executable, AutostartState};
     use std::ffi::{c_void, OsStr};
     use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
     use std::ptr::{null, null_mut};
 
     type Hkey = isize;
@@ -32,6 +51,7 @@ mod platform {
     const HKEY_CURRENT_USER: Hkey = 0x8000_0001_u32 as i32 as isize;
     const KEY_READ: Dword = 0x0002_0019;
     const KEY_SET_VALUE: Dword = 0x0002;
+    const KEY_WRITE: Dword = 0x0002_0006;
     const REG_SZ: Dword = 1;
     const REG_EXPAND_SZ: Dword = 2;
     const REG_BINARY: Dword = 3;
@@ -44,6 +64,7 @@ mod platform {
     const STARTUP_APPROVED_SUBKEY: &str =
         "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
     const VALUE_NAME: &str = "VoxCraftStudio";
+    const STARTUP_APPROVED_ENABLED: [u8; 12] = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
     #[link(name = "advapi32")]
     extern "system" {
@@ -211,6 +232,23 @@ mod platform {
         }
     }
 
+    fn set_startup_approved_enabled() {
+        let Ok(key) = create_key(STARTUP_APPROVED_SUBKEY, KEY_WRITE) else {
+            return;
+        };
+        let wide_name = to_wide_null(OsStr::new(VALUE_NAME));
+        let _ = unsafe {
+            RegSetValueExW(
+                key.0,
+                wide_name.as_ptr(),
+                0,
+                REG_BINARY,
+                STARTUP_APPROVED_ENABLED.as_ptr(),
+                STARTUP_APPROVED_ENABLED.len() as Dword,
+            )
+        };
+    }
+
     fn is_disabled_in_task_manager() -> Result<bool, String> {
         let Some(key) = open_key(STARTUP_APPROVED_SUBKEY, KEY_READ)? else {
             return Ok(false);
@@ -221,15 +259,15 @@ mod platform {
         Ok(value_type == REG_BINARY && data.first().is_some_and(|byte| (byte & 0x01) != 0))
     }
 
-    fn is_enabled() -> Result<bool, String> {
+    fn read_registered_command() -> Result<Option<String>, String> {
         let Some(key) = open_key(RUN_SUBKEY, KEY_READ)? else {
-            return Ok(false);
+            return Ok(None);
         };
         let Some((value_type, data)) = query_value(&key, VALUE_NAME)? else {
-            return Ok(false);
+            return Ok(None);
         };
         if value_type != REG_SZ && value_type != REG_EXPAND_SZ {
-            return Ok(false);
+            return Ok(None);
         }
         let mut units: Vec<u16> = data
             .chunks_exact(2)
@@ -240,6 +278,50 @@ mod platform {
         }
         let command = String::from_utf16_lossy(&units);
         if command.trim().is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(command))
+    }
+
+    fn current_exe_command() -> Result<String, String> {
+        let exe = std::env::current_exe()
+            .map_err(|error| format!("não foi possível localizar o executável: {error}"))?;
+        let display = exe.to_string_lossy();
+        let normalized = clean_windows_path(&display);
+        Ok(format!("\"{normalized}\""))
+    }
+
+    fn write_run_command(command: &str) -> Result<(), String> {
+        let wide_name = to_wide_null(OsStr::new(VALUE_NAME));
+        let wide_command = to_wide_null(OsStr::new(command));
+        let byte_len = u32::try_from(wide_command.len() * std::mem::size_of::<u16>())
+            .map_err(|_| "caminho do executável excede o tamanho suportado".to_string())?;
+        let key = create_key(RUN_SUBKEY, KEY_WRITE)?;
+        let status = unsafe {
+            RegSetValueExW(
+                key.0,
+                wide_name.as_ptr(),
+                0,
+                REG_SZ,
+                wide_command.as_ptr().cast::<u8>(),
+                byte_len,
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(format!(
+                "não foi possível salvar a inicialização no Windows (código {status})"
+            ));
+        }
+        set_startup_approved_enabled();
+        Ok(())
+    }
+
+    fn is_enabled() -> Result<bool, String> {
+        let Some(command) = read_registered_command()? else {
+            return Ok(false);
+        };
+        let executable = extract_command_executable(&command);
+        if executable.is_empty() || !Path::new(executable).is_file() {
             return Ok(false);
         }
         Ok(!is_disabled_in_task_manager()?)
@@ -255,36 +337,29 @@ mod platform {
 
     pub(super) fn set_enabled(enabled: bool) -> Result<AutostartState, String> {
         if enabled {
-            let exe = std::env::current_exe()
-                .map_err(|error| format!("não foi possível localizar o executável: {error}"))?;
-            let command = format!("\"{}\"", exe.display());
-            let wide_name = to_wide_null(OsStr::new(VALUE_NAME));
-            let wide_command = to_wide_null(OsStr::new(&command));
-            let byte_len = u32::try_from(wide_command.len() * std::mem::size_of::<u16>())
-                .map_err(|_| "caminho do executável excede o tamanho suportado".to_string())?;
-            let key = create_key(RUN_SUBKEY, KEY_SET_VALUE)?;
-            let status = unsafe {
-                RegSetValueExW(
-                    key.0,
-                    wide_name.as_ptr(),
-                    0,
-                    REG_SZ,
-                    wide_command.as_ptr().cast::<u8>(),
-                    byte_len,
-                )
-            };
-            if status != ERROR_SUCCESS {
-                return Err(format!(
-                    "não foi possível salvar a inicialização no Windows (código {status})"
-                ));
-            }
-            let _ = delete_value_if_present(STARTUP_APPROVED_SUBKEY, VALUE_NAME);
+            let command = current_exe_command()?;
+            write_run_command(&command)?;
         } else {
             delete_value_if_present(RUN_SUBKEY, VALUE_NAME)?;
             let _ = delete_value_if_present(STARTUP_APPROVED_SUBKEY, VALUE_NAME);
         }
 
         get_state()
+    }
+
+    pub(super) fn refresh_if_enabled() {
+        let Ok(Some(existing)) = read_registered_command() else {
+            return;
+        };
+        if is_disabled_in_task_manager().unwrap_or(false) {
+            return;
+        }
+        let Ok(desired) = current_exe_command() else {
+            return;
+        };
+        if existing.trim() != desired {
+            let _ = write_run_command(&desired);
+        }
     }
 }
 
@@ -460,8 +535,25 @@ X-GNOME-Autostart-enabled=true\n",
         })
     }
 
+    pub(super) fn refresh_if_enabled() {
+        let Ok(path) = autostart_file_path() else {
+            return;
+        };
+        if !read_enabled(&path).unwrap_or(false) {
+            return;
+        }
+        let Ok(executable) = executable_path() else {
+            return;
+        };
+        let desired = desktop_entry_contents(&executable);
+        if fs::read_to_string(&path).ok().as_deref() != Some(desired.as_str()) {
+            let _ = write_enabled(&path, &executable, true);
+        }
+    }
+
     #[cfg(test)]
     mod tests {
+        use super::super::{clean_windows_path, extract_command_executable};
         use super::{
             autostart_file_path_from, desktop_entry_contents, format_desktop_exec,
             is_desktop_entry_enabled, read_enabled, write_enabled, DESKTOP_FILENAME,
@@ -470,6 +562,20 @@ X-GNOME-Autostart-enabled=true\n",
         use std::fs;
         use std::path::Path;
         use std::time::{SystemTime, UNIX_EPOCH};
+
+        #[test]
+        fn extracts_and_cleans_windows_command_paths() {
+            assert_eq!(
+                extract_command_executable(
+                    "\"C:\\Users\\Test\\AppData\\Local\\VoxCraft Studio\\voxcraft-app.exe\""
+                ),
+                "C:\\Users\\Test\\AppData\\Local\\VoxCraft Studio\\voxcraft-app.exe"
+            );
+            assert_eq!(
+                clean_windows_path(r"\\?\C:\VoxCraft\voxcraft-app.exe"),
+                r"C:\VoxCraft\voxcraft-app.exe"
+            );
+        }
 
         #[test]
         fn resolves_xdg_autostart_path_with_home_fallback() {
@@ -562,4 +668,6 @@ mod platform {
     pub(super) fn set_enabled(_enabled: bool) -> Result<AutostartState, String> {
         Err("iniciar com o sistema está disponível apenas no Windows e no Linux".into())
     }
+
+    pub(super) fn refresh_if_enabled() {}
 }

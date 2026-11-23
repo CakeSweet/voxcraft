@@ -1,6 +1,6 @@
 (() => {
   const REPO = "CakeSweet/voxcraft";
-  const DEFAULT_VERSION = "2.5.1";
+  const DEFAULT_VERSION = "2.5.2";
 
   const PRESET_GROUPS = [
     {

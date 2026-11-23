@@ -58,7 +58,11 @@ impl CoreProcess {
                 core.display()
             ));
         }
-        Ok(Command::new(core))
+        let mut command = Command::new(&core);
+        if let Some(dir) = core.parent() {
+            command.current_dir(dir);
+        }
+        Ok(command)
     }
 
     fn spawn() -> Result<(Self, Value), String> {
@@ -704,6 +708,14 @@ pub fn run() {
             updater::updater_target,
             updater::restart_app
         ])
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
             let core = Arc::new(CoreState::new());
             // The Windows updater clears Tauri resources before exiting to run NSIS.
@@ -711,7 +723,19 @@ pub fn run() {
             app.manage(core);
             #[cfg(target_os = "linux")]
             app.manage(PortalShortcutState::default());
-            tray::setup(app)?;
+            autostart::refresh_if_enabled();
+            if let Err(error) = tray::setup(app.handle()) {
+                eprintln!("VoxCraft tray: {error}");
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    for _ in 0..5 {
+                        std::thread::sleep(Duration::from_secs(1));
+                        if tray::setup(&handle).is_ok() {
+                            return;
+                        }
+                    }
+                });
+            }
             Ok(())
         });
 
