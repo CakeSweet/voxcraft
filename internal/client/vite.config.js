@@ -1,5 +1,4 @@
 import { defineConfig } from "vite";
-import process from "node:process";
 
 const host = process.env.TAURI_DEV_HOST;
 

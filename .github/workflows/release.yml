@@ -4,6 +4,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publicar release no GitHub (usa a versão de tauri.conf.json)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -37,9 +42,18 @@ jobs:
           cache: npm
           cache-dependency-path: internal/client/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
-      - name: conferir a versão da tag
-        if: github.event_name == 'push'
+      - name: conferir a versão da release
         run: python scripts/release.py check
+      - name: conferir se a release já existe
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$(python scripts/release.py tag)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "A release $tag já existe. Atualize a versão antes de publicar." >&2
+            exit 1
+          fi
       - name: instalar dependências do linux
         if: runner.os == 'Linux'
         run: |
@@ -67,7 +81,7 @@ jobs:
 
   publish:
     name: publicar
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || inputs.publish
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -82,8 +96,14 @@ jobs:
           pattern: bundles-*
           path: build/artifacts
       - name: preparar instaladores e latest.json
+        id: stage
         run: python scripts/release.py stage build/artifacts build/release
       - name: publicar no github releases
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --latest build/release/*
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            gh release create "${{ steps.stage.outputs.tag }}" --verify-tag --generate-notes --latest build/release/*
+          else
+            gh release create "${{ steps.stage.outputs.tag }}" --target "${{ github.sha }}" --generate-notes --latest build/release/*
+          fi

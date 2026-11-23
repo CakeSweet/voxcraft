@@ -20,17 +20,27 @@ INSTALLERS = {
 }
 
 
-def release_version(tag: str) -> str:
-    if not re.fullmatch(r"v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", tag):
-        raise RuntimeError(f"Use uma tag no formato vMAJOR.MINOR.PATCH: {tag!r}")
-    version = tag[1:]
+def configured_version() -> str:
     tauri_config = CLIENT_DIR / "src-back" / "tauri.conf.json"
     config_version = json.loads(tauri_config.read_text(encoding="utf-8"))["version"]
     core_file = CORE_DIR / "src" / "__init__.py"
     core_version = re.search(r'^APP_VERSION\s*=\s*"([^"]+)"', core_file.read_text(encoding="utf-8"), re.M)
-    if config_version != version or core_version is None or core_version.group(1) != version:
-        raise RuntimeError("A versão da tag deve coincidir com tauri.conf.json e APP_VERSION do core.")
-    return version
+    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", config_version):
+        raise RuntimeError(f"Versão inválida em tauri.conf.json (use MAJOR.MINOR.PATCH): {config_version!r}")
+    if core_version is None or core_version.group(1) != config_version:
+        raise RuntimeError("A versão de tauri.conf.json deve coincidir com APP_VERSION do core.")
+    return config_version
+
+
+def resolve_release(tag: str | None = None) -> tuple[str, str]:
+    version = configured_version()
+    expected_tag = f"v{version}"
+    if tag is not None:
+        if not re.fullmatch(r"v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", tag):
+            raise RuntimeError(f"Use uma tag no formato vMAJOR.MINOR.PATCH: {tag!r}")
+        if tag != expected_tag:
+            raise RuntimeError("A versão da tag deve coincidir com tauri.conf.json e APP_VERSION do core.")
+    return expected_tag, version
 
 
 def stage_installers(source: Path, destination: Path, *, repo: str, tag: str, version: str) -> None:
@@ -65,21 +75,34 @@ def stage_installers(source: Path, destination: Path, *, repo: str, tag: str, ve
     (destination / "latest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
+def write_github_output(name: str, value: str) -> None:
+    output_file = os.environ.get("GITHUB_OUTPUT")
+    if output_file:
+        with Path(output_file).open("a", encoding="utf-8") as handle:
+            handle.write(f"{name}={value}\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check")
+    commands.add_parser("tag")
     stage = commands.add_parser("stage")
     stage.add_argument("source", type=Path)
     stage.add_argument("destination", type=Path)
     args = parser.parse_args()
-    tag = os.environ.get("GITHUB_REF_NAME", "")
-    version = release_version(tag)
+    ref_is_tag = os.environ.get("GITHUB_REF_TYPE") == "tag" or os.environ.get("GITHUB_EVENT_NAME") == "push"
+    explicit_tag = os.environ.get("GITHUB_REF_NAME", "") if ref_is_tag else None
+    tag, version = resolve_release(explicit_tag)
+    if args.command == "tag":
+        print(tag)
+        return
     if args.command == "stage":
         repo = os.environ.get("GITHUB_REPOSITORY")
         if not repo:
             raise RuntimeError("GITHUB_REPOSITORY não definido.")
         stage_installers(args.source, args.destination, repo=repo, tag=tag, version=version)
+        write_github_output("tag", tag)
 
 
 if __name__ == "__main__":
