@@ -12,6 +12,7 @@ use tauri::{Emitter, Manager, State};
 #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+mod autostart;
 mod tray;
 mod updater;
 
@@ -698,6 +699,8 @@ pub fn run() {
             configure_native_hotkey,
             set_wayland_global_shortcut,
             configure_wayland_global_shortcut,
+            autostart::get_autostart_state,
+            autostart::set_autostart_enabled,
             updater::updater_target,
             updater::restart_app
         ])

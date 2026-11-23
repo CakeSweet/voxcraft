@@ -43,6 +43,9 @@ const TEXT = {
         wave_saw: "Dente de Serra", wave_chord: "Acorde", wave_whisper: "Sussurro (Ruído)",
         settings_title: "Configurações", appearance_section: "Aparência", theme_label: "Tema", theme_dark: "Escuro (Dark)",
         theme_oled: "Dark Puro (OLED)", theme_light: "Claro (Light)", language_label: "Idioma", close: "Fechar",
+        system_section: "Sistema", startup_label: "Iniciar com o sistema",
+        startup_label_windows: "Iniciar com o Windows",
+        startup_err: "Não foi possível alterar a inicialização com o sistema",
         minimize_window: "Minimizar", maximize_window: "Maximizar", restore_window: "Restaurar",
         close_window: "Encerrar VoxCraft Studio",
         upd_header: "Atualização do VoxCraft Studio", upd_check_btn: "Verificar",
@@ -98,6 +101,9 @@ const TEXT = {
         wave_saw: "Sawtooth", wave_chord: "Chord", wave_whisper: "Whisper (Noise)",
         settings_title: "Settings", appearance_section: "Appearance", theme_label: "Theme", theme_dark: "Dark",
         theme_oled: "Pure Dark (OLED)", theme_light: "Light", language_label: "Language", close: "Close",
+        system_section: "System", startup_label: "Start with system",
+        startup_label_windows: "Start with Windows",
+        startup_err: "Could not change startup setting",
         minimize_window: "Minimize", maximize_window: "Maximize", restore_window: "Restore",
         close_window: "Quit VoxCraft Studio",
         upd_header: "VoxCraft Studio Update", upd_check_btn: "Check",
@@ -153,6 +159,9 @@ const TEXT = {
         wave_saw: "Diente de Sierra", wave_chord: "Acorde", wave_whisper: "Susurro (Ruido)",
         settings_title: "Configuración", appearance_section: "Apariencia", theme_label: "Tema", theme_dark: "Oscuro (Dark)",
         theme_oled: "Dark Puro (OLED)", theme_light: "Claro (Light)", language_label: "Idioma", close: "Cerrar",
+        system_section: "Sistema", startup_label: "Iniciar con el sistema",
+        startup_label_windows: "Iniciar con Windows",
+        startup_err: "No se pudo cambiar el inicio con el sistema",
         minimize_window: "Minimizar", maximize_window: "Maximizar", restore_window: "Restaurar",
         close_window: "Salir de VoxCraft Studio",
         upd_header: "Actualización de VoxCraft Studio", upd_check_btn: "Verificar",
@@ -373,6 +382,8 @@ let hotkeyGlobalError = "";
 let portalHotkeyDescription = "";
 let hotkeyRegistrationQueue = Promise.resolve();
 let playHotkeyFeedback = () => {};
+let autostartSupported = false;
+let autostartBusy = false;
 let showMessage;
 
 function normalizeHotkeyKey(key) {
@@ -1735,6 +1746,7 @@ function setupDialogs() {
     document.querySelector("#open-settings").addEventListener("click", () => {
         if (pendingMessage) return;
         openDialog(document.querySelector("#settings-dialog"));
+        void syncAutostartState();
     });
     document.querySelector("#open-updates").addEventListener("click", () => {
         const dialog = document.querySelector("#updates-dialog");
@@ -1859,6 +1871,68 @@ async function connectCore() {
     }
 }
 
+function applyAutostartState(state) {
+    const autostartControl = document.querySelector("#autostart-enabled");
+    const autostartLabel = document.querySelector("#autostart-label");
+    if (!autostartControl || !autostartLabel) return;
+
+    autostartSupported = state?.supported === true;
+    const labelKey = state?.platform === "windows" ? "startup_label_windows" : "startup_label";
+    autostartLabel.dataset.i18n = labelKey;
+    autostartLabel.textContent = t(labelKey);
+    autostartControl.checked = state?.enabled === true;
+    autostartControl.disabled = !autostartSupported;
+}
+
+async function syncAutostartState() {
+    const autostartControl = document.querySelector("#autostart-enabled");
+    if (!autostartControl || autostartBusy) return;
+    if (!("__TAURI_INTERNALS__" in window)) {
+        autostartSupported = false;
+        autostartControl.checked = false;
+        autostartControl.disabled = true;
+        return;
+    }
+
+    try {
+        const state = await invoke("get_autostart_state");
+        if (!autostartBusy) applyAutostartState(state);
+    } catch (error) {
+        console.error("Não foi possível consultar a inicialização com o sistema:", error);
+        autostartSupported = false;
+        autostartControl.disabled = true;
+    }
+}
+
+function setupAutostart() {
+    const autostartControl = document.querySelector("#autostart-enabled");
+    if (!autostartControl) return;
+
+    autostartControl.addEventListener("change", async () => {
+        if (!("__TAURI_INTERNALS__" in window) || autostartBusy) return;
+        const nextEnabled = autostartControl.checked;
+        autostartBusy = true;
+        autostartControl.disabled = true;
+        try {
+            const state = await invoke("set_autostart_enabled", { enabled: nextEnabled });
+            applyAutostartState(state);
+        } catch (error) {
+            autostartControl.checked = !nextEnabled;
+            await showMessage({
+                title: t("notice"),
+                message: `${t("startup_err")}: ${String(error)}`,
+            });
+        } finally {
+            autostartBusy = false;
+            if ("__TAURI_INTERNALS__" in window) {
+                autostartControl.disabled = !autostartSupported;
+            }
+        }
+    });
+
+    void syncAutostartState();
+}
+
 export function initializeStudio() {
     buildDynamicsControls();
     setupGateThresholdControl();
@@ -1866,6 +1940,7 @@ export function initializeStudio() {
     applyStoredThemeAndLanguage();
     setupEvents();
     setupDialogs();
+    setupAutostart();
     setupWindowControls(t);
     setupHotkey();
     updateBypassButton();
