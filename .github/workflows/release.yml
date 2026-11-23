@@ -48,12 +48,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          tag="$(python scripts/release.py tag)"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "A release $tag já existe. Atualize a versão antes de publicar." >&2
-            exit 1
-          fi
+        run: python scripts/release.py check --ensure-new
       - name: instalar dependências do linux
         if: runner.os == 'Linux'
         run: |

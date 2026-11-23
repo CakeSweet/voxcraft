@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 from urllib.parse import quote
 
 from common import CLIENT_DIR, CORE_DIR, run_script
@@ -85,7 +86,8 @@ def write_github_output(name: str, value: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("check")
+    check = commands.add_parser("check")
+    check.add_argument("--ensure-new", action="store_true")
     commands.add_parser("tag")
     stage = commands.add_parser("stage")
     stage.add_argument("source", type=Path)
@@ -94,6 +96,16 @@ def main() -> None:
     ref_is_tag = os.environ.get("GITHUB_REF_TYPE") == "tag" or os.environ.get("GITHUB_EVENT_NAME") == "push"
     explicit_tag = os.environ.get("GITHUB_REF_NAME", "") if ref_is_tag else None
     tag, version = resolve_release(explicit_tag)
+    if args.command == "check":
+        if args.ensure_new:
+            result = subprocess.run(
+                ["gh", "release", "view", tag],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if result.returncode == 0:
+                raise RuntimeError(f"A release {tag} já existe. Atualize a versão antes de publicar.")
+        return
     if args.command == "tag":
         print(tag)
         return
