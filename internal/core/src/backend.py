@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import json
+import math
 import sys
 from typing import Any
 
@@ -56,7 +57,23 @@ class VoxCraftCore:
         if unknown:
             raise ValueError(f"Parâmetros desconhecidos: {', '.join(sorted(unknown))}")
 
-        current.update(raw_params)
+        for key, value in raw_params.items():
+            default_value = current[key]
+            if type(default_value) is bool:
+                if type(value) is not bool:
+                    raise ValueError(f"Parâmetro '{key}' precisa ser booleano.")
+            elif type(default_value) is int:
+                if type(value) is not int:
+                    raise ValueError(f"Parâmetro '{key}' precisa ser inteiro.")
+            elif type(default_value) is float:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                    raise ValueError(f"Parâmetro '{key}' precisa ser numérico e finito.")
+                value = float(value)
+            elif isinstance(default_value, str):
+                if not isinstance(value, str):
+                    raise ValueError(f"Parâmetro '{key}' precisa ser texto.")
+            current[key] = value
+
         # O compressor permanece parte da dinâmica global e não pode ser desligado.
         current["comp_enabled"] = True
         self.params = DSPParams(**current)

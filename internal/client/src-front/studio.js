@@ -370,6 +370,13 @@ let paramTimer = null;
 let parameterUpdateQueue = Promise.resolve();
 let audioOperationQueue = Promise.resolve();
 let meterBusy = false;
+let meterIntervalId = null;
+let themeCanvasColors = null;
+let lastWaveformSamples = [];
+let waveformDirty = true;
+let lastWaveformWasFlat = false;
+let meterElements = null;
+const lastMeterDisplay = { inputWidth: "", outputWidth: "", inputText: "", outputText: "" };
 let captureHotkey = false;
 let hotkey = localStorage.getItem("voxcraft-hotkey") || "F9";
 const HOTKEY_MODIFIER_ORDER = ["CTRL", "ALT", "SHIFT", "SUPER"];
@@ -594,9 +601,6 @@ function applyLanguage(nextLanguage) {
     document.querySelectorAll("[data-tab-label]").forEach((button) => {
         button.textContent = t(button.dataset.tabLabel);
     });
-    document.querySelectorAll("[data-mixer-label]").forEach((element) => {
-        element.textContent = t(element.dataset.mixerLabel);
-    });
     document.querySelectorAll("[data-window-control]").forEach((button) => {
         const label = t(button.dataset.windowControl);
         button.setAttribute("aria-label", label);
@@ -608,13 +612,26 @@ function applyLanguage(nextLanguage) {
     updateGateRangeDescription(document.querySelector("#gate-threshold-range"));
 }
 
+function readThemeCanvasColors() {
+    const styles = getComputedStyle(document.documentElement);
+    themeCanvasColors = {
+        accent: styles.getPropertyValue("--accent").trim(),
+        grid: styles.getPropertyValue("--grid-line").trim(),
+        zero: styles.getPropertyValue("--grid-zero").trim(),
+        subtle: styles.getPropertyValue("--text-subtle").trim(),
+    };
+    return themeCanvasColors;
+}
+
 function applyTheme(nextTheme) {
     theme = ["dark", "oled", "light"].includes(nextTheme) ? nextTheme : "dark";
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("voxcraft-theme", theme);
     document.querySelector("#theme-select").value = theme;
+    readThemeCanvasColors();
+    waveformDirty = true;
     drawEqCurve();
-    drawWaveform([]);
+    drawWaveform(lastWaveformSamples);
 }
 
 function setAudioStatus(message, running = audioRunning, error = false) {
@@ -989,22 +1006,27 @@ function resetEqualizer() {
     });
 }
 
-function drawEqCurve() {
-    const canvas = document.querySelector("#eq-canvas");
-    if (!canvas || canvas.clientWidth < 2) return;
+function prepareCanvas(canvas) {
     const ratio = window.devicePixelRatio || 1;
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
-    canvas.width = Math.round(width * ratio);
-    canvas.height = Math.round(height * ratio);
+    const targetWidth = Math.round(width * ratio);
+    const targetHeight = Math.round(height * ratio);
+    const resized = canvas.width !== targetWidth || canvas.height !== targetHeight;
+    if (resized) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+    }
     const context = canvas.getContext("2d");
-    context.scale(ratio, ratio);
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    return { context, width, height, resized };
+}
 
-    const styles = getComputedStyle(document.documentElement);
-    const lineColor = styles.getPropertyValue("--accent").trim();
-    const gridColor = styles.getPropertyValue("--grid-line").trim();
-    const zeroColor = styles.getPropertyValue("--grid-zero").trim();
-    const textColor = styles.getPropertyValue("--text-subtle").trim();
+function drawEqCurve() {
+    const canvas = document.querySelector("#eq-canvas");
+    if (!canvas || canvas.clientWidth < 2) return;
+    const { context, width, height } = prepareCanvas(canvas);
+    const colors = themeCanvasColors || readThemeCanvasColors();
     const pad = { left: 36, right: 12, top: 14, bottom: 22 };
     const plotW = width - pad.left - pad.right;
     const plotH = height - pad.top - pad.bottom;
@@ -1017,31 +1039,31 @@ function drawEqCurve() {
     context.textBaseline = "middle";
     [-12, -6, 0, 6, 12].forEach((db) => {
         const y = yFor(db);
-        context.strokeStyle = db === 0 ? zeroColor : gridColor;
+        context.strokeStyle = db === 0 ? colors.zero : colors.grid;
         context.lineWidth = 1;
         context.beginPath();
         context.moveTo(pad.left, y);
         context.lineTo(width - pad.right, y);
         context.stroke();
-        context.fillStyle = textColor;
+        context.fillStyle = colors.subtle;
         context.fillText(`${db}`, 5, y);
     });
     const frequencies = [20, 100, 500, 1000, 5000, 10000, 20000];
     frequencies.forEach((frequency) => {
         const x = pad.left + (Math.log10(frequency / 20) / 3) * plotW;
-        context.strokeStyle = gridColor;
+        context.strokeStyle = colors.grid;
         context.beginPath();
         context.moveTo(x, pad.top);
         context.lineTo(x, pad.top + plotH);
         context.stroke();
-        context.fillStyle = textColor;
+        context.fillStyle = colors.subtle;
         context.textAlign = "center";
         context.fillText(frequency >= 1000 ? `${frequency / 1000}k` : String(frequency), x, height - 9);
     });
 
     const centers = [120, 400, 1200, 3500, 7500];
     const gains = [1, 2, 3, 4, 5].map((index) => Number(params[`eq_band${index}_db`] || 0));
-    context.strokeStyle = lineColor;
+    context.strokeStyle = colors.accent;
     context.lineWidth = 2;
     context.beginPath();
     for (let i = 0; i <= 180; i += 1) {
@@ -1071,41 +1093,86 @@ function drawEqCurve() {
 function drawWaveform(samples) {
     const canvas = document.querySelector("#waveform");
     if (!canvas || canvas.clientWidth < 2) return;
+    const data = samples?.length ? samples : null;
+    const isFlat = !data || data.every((sample) => Math.abs(Number(sample)) < 1e-4);
     const ratio = window.devicePixelRatio || 1;
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    canvas.width = Math.round(width * ratio);
-    canvas.height = Math.round(height * ratio);
-    const context = canvas.getContext("2d");
-    context.scale(ratio, ratio);
-    const styles = getComputedStyle(document.documentElement);
+    const targetWidth = Math.round(canvas.clientWidth * ratio);
+    const targetHeight = Math.round(canvas.clientHeight * ratio);
+    if (!waveformDirty && isFlat && lastWaveformWasFlat
+        && canvas.width === targetWidth && canvas.height === targetHeight) {
+        return;
+    }
+
+    const { context, width, height } = prepareCanvas(canvas);
+    const colors = themeCanvasColors || readThemeCanvasColors();
     context.clearRect(0, 0, width, height);
-    context.strokeStyle = styles.getPropertyValue("--grid-line").trim();
+    context.strokeStyle = colors.grid;
+    context.lineWidth = 1;
     context.beginPath();
     context.moveTo(0, height / 2);
     context.lineTo(width, height / 2);
     context.stroke();
-    context.strokeStyle = styles.getPropertyValue("--accent").trim();
+
+    context.strokeStyle = colors.accent;
     context.lineWidth = 1.5;
     context.beginPath();
-    const data = samples?.length ? samples : Array(128).fill(0);
-    data.forEach((sample, index) => {
-        const x = (index / Math.max(1, data.length - 1)) * width;
-        const y = height / 2 - Math.max(-1, Math.min(1, Number(sample))) * (height * 0.42);
-        if (index === 0) context.moveTo(x, y);
-        else context.lineTo(x, y);
-    });
+    if (!data || isFlat) {
+        context.moveTo(0, height / 2);
+        context.lineTo(width, height / 2);
+    } else {
+        const lastIndex = Math.max(1, data.length - 1);
+        for (let index = 0; index < data.length; index += 1) {
+            const x = (index / lastIndex) * width;
+            const y = height / 2 - Math.max(-1, Math.min(1, Number(data[index]))) * (height * 0.42);
+            if (index === 0) context.moveTo(x, y);
+            else context.lineTo(x, y);
+        }
+    }
     context.stroke();
+    waveformDirty = false;
+    lastWaveformWasFlat = isFlat;
+}
+
+function getMeterElements() {
+    if (!meterElements) {
+        meterElements = {
+            inputMeter: document.querySelector("#input-meter"),
+            outputMeter: document.querySelector("#output-meter"),
+            inputDb: document.querySelector("#input-db"),
+            outputDb: document.querySelector("#output-db"),
+        };
+    }
+    return meterElements;
 }
 
 function updateMeters(meter) {
     const inputLevel = Math.max(0, Math.min(60, Number(meter.inputPeakDb ?? -60) + 60));
     const outputLevel = Math.max(0, Math.min(60, Number(meter.outputPeakDb ?? -60) + 60));
-    document.querySelector("#input-meter").style.width = `${(inputLevel / 60) * 100}%`;
-    document.querySelector("#output-meter").style.width = `${(outputLevel / 60) * 100}%`;
-    document.querySelector("#input-db").textContent = `${inputLevel.toFixed(0)} dB`;
-    document.querySelector("#output-db").textContent = `${outputLevel.toFixed(0)} dB`;
-    drawWaveform(meter.waveform);
+    const elements = getMeterElements();
+    const inputWidth = `${(inputLevel / 60) * 100}%`;
+    const outputWidth = `${(outputLevel / 60) * 100}%`;
+    const inputText = `${inputLevel.toFixed(0)} dB`;
+    const outputText = `${outputLevel.toFixed(0)} dB`;
+
+    if (lastMeterDisplay.inputWidth !== inputWidth) {
+        lastMeterDisplay.inputWidth = inputWidth;
+        elements.inputMeter.style.width = inputWidth;
+    }
+    if (lastMeterDisplay.outputWidth !== outputWidth) {
+        lastMeterDisplay.outputWidth = outputWidth;
+        elements.outputMeter.style.width = outputWidth;
+    }
+    if (lastMeterDisplay.inputText !== inputText) {
+        lastMeterDisplay.inputText = inputText;
+        elements.inputDb.textContent = inputText;
+    }
+    if (lastMeterDisplay.outputText !== outputText) {
+        lastMeterDisplay.outputText = outputText;
+        elements.outputDb.textContent = outputText;
+    }
+
+    lastWaveformSamples = Array.isArray(meter.waveform) ? meter.waveform : [];
+    drawWaveform(lastWaveformSamples);
     if (Boolean(meter.running) !== audioRunning) {
         audioRunning = Boolean(meter.running);
         setAudioStatus(audioRunning ? t("audio_started") : t("stopped"), audioRunning);
@@ -1113,7 +1180,7 @@ function updateMeters(meter) {
 }
 
 async function pollMeters() {
-    if (!coreConnected || meterBusy) return;
+    if (!coreConnected || meterBusy || document.hidden) return;
     meterBusy = true;
     try {
         updateMeters(await coreRequest("meters"));
@@ -1831,14 +1898,25 @@ async function connectCore() {
         const deviceList = await coreRequest("list_devices");
         const saved = readStoredVoiceSettings();
         const savedParams = Object.fromEntries(Object.entries(loadedParams).flatMap(([key, fallback]) => {
-            const value = saved.params?.[key];
-            return typeof value === typeof fallback && (typeof value !== "number" || Number.isFinite(value))
-                ? [[key, value]]
-                : [];
+            let value = saved.params?.[key];
+            if (typeof value !== typeof fallback) return [];
+            if (typeof value === "number" && !Number.isFinite(value)) return [];
+            if (key === "noise_suppression_level") {
+                const rounded = Math.round(value);
+                value = Math.max(0, Math.min(3, rounded));
+            }
+            return [[key, value]];
         }));
-        params = Object.keys(savedParams).length
-            ? await coreRequest("set_params", { params: savedParams })
-            : loadedParams;
+        if (Object.keys(savedParams).length) {
+            try {
+                params = await coreRequest("set_params", { params: savedParams });
+            } catch (error) {
+                console.warn("Parâmetros salvos inválidos ignorados:", error);
+                params = loadedParams;
+            }
+        } else {
+            params = loadedParams;
+        }
         presetNames = presetList;
         if (typeof saved.selectedPreset === "string") {
             const custom = saved.selectedPreset.startsWith("★ ");
@@ -1864,7 +1942,8 @@ async function connectCore() {
         } else {
             await ensureAudioRunning();
         }
-        window.setInterval(() => void pollMeters(), 180);
+        if (meterIntervalId !== null) window.clearInterval(meterIntervalId);
+        meterIntervalId = window.setInterval(() => void pollMeters(), 180);
     } catch (error) {
         coreConnected = false;
         setAudioStatus(`${t("core_unavailable")}: ${String(error)}`, false, true);
@@ -1946,12 +2025,26 @@ export function initializeStudio() {
     updateBypassButton();
     setupUpdater();
 
-    window.addEventListener("resize", () => {
+    const redrawVisibleCanvases = () => {
+        waveformDirty = true;
         drawEqCurve();
-        drawWaveform([]);
+        drawWaveform(lastWaveformSamples);
+    };
+
+    window.addEventListener("resize", redrawVisibleCanvases);
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+            redrawVisibleCanvases();
+            if (coreConnected) void pollMeters();
+        }
     });
 
     if ("__TAURI_INTERNALS__" in window) {
+        void listen("voxcraft-window-shown", () => {
+            redrawVisibleCanvases();
+            if (coreConnected) void pollMeters();
+        }).catch((error) => console.error("Não foi possível acompanhar a exibição da janela:", error));
+
         // Reveal the themed shell first; startup of the audio engine must not gate it.
         void getCurrentWindow().show()
             .catch((error) => console.error("Não foi possível mostrar a janela:", error))

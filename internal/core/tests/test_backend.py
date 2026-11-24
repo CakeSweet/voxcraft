@@ -71,3 +71,22 @@ class StdioServerTests(unittest.TestCase):
         ):
             backend.run_stdio_server()
         core.close.assert_called_once_with()
+
+
+class ParameterValidationTests(unittest.TestCase):
+    def test_set_params_rejects_non_finite_and_invalid_types(self):
+        core = backend.VoxCraftCore()
+        for bad_payload in (
+            {"input_gain_db": float("nan")},
+            {"output_gain_db": float("inf")},
+            {"input_gain_db": True},
+            {"noise_suppression_level": True},
+            {"noise_suppression_level": 2.0},
+            {"bypass": 1},
+            {"vocoder_carrier": 123},
+        ):
+            with self.assertRaises(ValueError):
+                core._set_params(bad_payload)
+        result = core._set_params({"input_gain_db": 3, "bypass": True})
+        self.assertEqual(result["input_gain_db"], 3.0)
+        self.assertIs(result["bypass"], True)

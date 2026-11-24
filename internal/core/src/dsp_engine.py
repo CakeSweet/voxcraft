@@ -308,9 +308,7 @@ class RealTimeDSPEngine:
             if bool(self.params.bypass) != prev_bypass:
                 self._pending_clear = True
             if self.params.noise_suppression_level != prev_noise_suppression_level:
-                self._noise_suppressor = StreamingNoiseSuppressor(
-                    self.sr, level=self.params.noise_suppression_level
-                )
+                self._noise_suppressor.set_level(self.params.noise_suppression_level)
 
     def clear_effect_buffers(self):
         with self._lock:

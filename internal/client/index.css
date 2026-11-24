@@ -192,7 +192,8 @@ body {
     font-size: 12px;
 }
 
-:root[data-square-corners] {
+:root[data-square-corners],
+:root[data-platform="windows"] {
     --window-radius: 0px;
 }
 

@@ -5,7 +5,10 @@ use serde_json::{json, Value};
 use std::{
     io::{BufRead, BufReader, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager, State};
@@ -13,6 +16,7 @@ use tauri::{Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 mod autostart;
+mod single_instance;
 mod tray;
 mod updater;
 
@@ -217,7 +221,15 @@ impl CoreState {
         params: Value,
     ) -> Result<Value, String> {
         match connection {
-            CoreConnection::Running(process) => process.request(method, params),
+            CoreConnection::Running(process) => match process.request(method, params) {
+                Ok(result) => Ok(result),
+                Err(error) => {
+                    if matches!(process.child.try_wait(), Ok(Some(_))) {
+                        *connection = CoreConnection::Failed(error.clone());
+                    }
+                    Err(error)
+                }
+            },
             CoreConnection::Failed(error) => Err(error.clone()),
             CoreConnection::NotStarted | CoreConnection::Stopped => {
                 Err("core Python não iniciado".into())
@@ -685,8 +697,46 @@ fn configure_wayland_global_shortcut() -> Result<(), String> {
     Err("o portal de atalhos Wayland só está disponível no Linux".into())
 }
 
+#[cfg(target_os = "windows")]
+fn apply_windows_window_style(window: &tauri::WebviewWindow) {
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: isize,
+            dw_attribute: u32,
+            pv_attribute: *const std::ffi::c_void,
+            cb_attribute: u32,
+        ) -> i32;
+    }
+
+    const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWCP_ROUND: u32 = 2;
+    let preference = DWMWCP_ROUND;
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd.0 as isize,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            (&preference as *const u32).cast(),
+            std::mem::size_of::<u32>() as u32,
+        );
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let instance_guard = match single_instance::acquire() {
+        single_instance::AcquireOutcome::Primary(guard) => Arc::new(Mutex::new(Some(guard))),
+        single_instance::AcquireOutcome::AlreadyRunning => return,
+    };
+
+    let app_exiting = Arc::new(AtomicBool::new(false));
+    let setup_guard = Arc::clone(&instance_guard);
+    let setup_exiting = Arc::clone(&app_exiting);
+
     let builder = tauri::Builder::default();
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     let builder = if is_wayland_session() {
@@ -716,20 +766,57 @@ pub fn run() {
                 }
             }
         })
-        .setup(|app| {
+        .setup(move |app| {
             let core = Arc::new(CoreState::new());
             // The Windows updater clears Tauri resources before exiting to run NSIS.
             app.resources_table().add(CoreShutdown(Arc::clone(&core)));
             app.manage(core);
             #[cfg(target_os = "linux")]
             app.manage(PortalShortcutState::default());
-            autostart::refresh_if_enabled();
+
+            let window_builder = tauri::WebviewWindowBuilder::new(
+                app.handle(),
+                "main",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .title("VoxCraft Studio")
+            .inner_size(1280.0, 820.0)
+            .min_inner_size(640.0, 460.0)
+            .decorations(false)
+            .visible(false);
+            #[cfg(target_os = "windows")]
+            let window_builder = window_builder
+                .transparent(false)
+                .background_color(tauri::window::Color(11, 17, 32, 255));
+            #[cfg(not(target_os = "windows"))]
+            let window_builder = window_builder.transparent(true);
+            let window = window_builder.build()?;
+            #[cfg(target_os = "windows")]
+            apply_windows_window_style(&window);
+            #[cfg(not(target_os = "windows"))]
+            let _ = window;
+
+            if let Ok(mut guard_slot) = setup_guard.lock() {
+                if let Some(guard) = guard_slot.as_mut() {
+                    let activate_handle = app.handle().clone();
+                    guard.start_listener(move || {
+                        tray::show_main_window(&activate_handle);
+                    });
+                }
+            }
+
+            std::thread::spawn(autostart::refresh_if_enabled);
+
             if let Err(error) = tray::setup(app.handle()) {
                 eprintln!("VoxCraft tray: {error}");
                 let handle = app.handle().clone();
+                let exiting = Arc::clone(&setup_exiting);
                 std::thread::spawn(move || {
-                    for _ in 0..5 {
-                        std::thread::sleep(Duration::from_secs(1));
+                    for _ in 0..15 {
+                        std::thread::sleep(Duration::from_secs(2));
+                        if exiting.load(Ordering::Acquire) {
+                            return;
+                        }
                         if tray::setup(&handle).is_ok() {
                             return;
                         }
@@ -742,8 +829,14 @@ pub fn run() {
     let app = updater::configure(builder)
         .build(tauri::generate_context!())
         .expect("erro ao iniciar VoxCraft Studio");
-    app.run(|app_handle, event| {
+    app.run(move |app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit) {
+            app_exiting.store(true, Ordering::Release);
+            if let Ok(mut guard_slot) = instance_guard.lock() {
+                if let Some(mut guard) = guard_slot.take() {
+                    guard.shutdown();
+                }
+            }
             app_handle.state::<Arc<CoreState>>().shutdown();
             #[cfg(target_os = "linux")]
             app_handle.state::<PortalShortcutState>().shutdown();

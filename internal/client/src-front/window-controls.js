@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 
 function occupiesWorkAreaAxis(size, monitor, isLinux) {
@@ -9,6 +10,11 @@ function occupiesWorkAreaAxis(size, monitor, isLinux) {
 }
 
 export function setupWindowControls(translate) {
+    const platform = navigator.platform.toLowerCase();
+    if (platform.startsWith("win")) {
+        document.documentElement.dataset.platform = "windows";
+    }
+
     if (!("__TAURI_INTERNALS__" in window)) {
         document.querySelector(".window-controls").hidden = true;
         document.querySelectorAll(".window-resize-handle").forEach((handle) => {
@@ -21,7 +27,7 @@ export function setupWindowControls(translate) {
     const maximizeButton = document.querySelector("#window-maximize");
     const maximizeIcon = document.querySelector("#window-maximize-icon");
     const restoreIcon = document.querySelector("#window-restore-icon");
-    const isLinux = navigator.platform.toLowerCase().startsWith("linux");
+    const isLinux = platform.startsWith("linux");
     let windowStateTimer;
     let windowStateQuery = 0;
 
@@ -77,4 +83,6 @@ export function setupWindowControls(translate) {
         .catch((error) => console.error("Não foi possível acompanhar o redimensionamento da janela:", error));
     void appWindow.onMoved(scheduleWindowStateSync)
         .catch((error) => console.error("Não foi possível acompanhar a posição da janela:", error));
+    void listen("voxcraft-window-shown", () => void syncWindowState())
+        .catch((error) => console.error("Não foi possível acompanhar a restauração da janela:", error));
 }

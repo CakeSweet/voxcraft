@@ -1080,10 +1080,7 @@ class AudioRouter:
     def _default_monitor_index() -> int | None:
         try:
             if sys.platform.startswith("linux"):
-                default_sink = subprocess.run(
-                    ["pactl", "get-default-sink"],
-                    capture_output=True, check=True, timeout=1, encoding="utf-8",
-                ).stdout.strip()
+                default_sink = _run_pactl(["get-default-sink"]).stdout.strip()
                 endpoints = _linux_sound_endpoints("sinks") or []
                 for endpoint in endpoints:
                     if endpoint["name"] != default_sink:

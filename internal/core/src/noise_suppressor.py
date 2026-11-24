@@ -14,11 +14,9 @@ class StreamingNoiseSuppressor:
     )
 
     def __init__(self, sample_rate: float, level: int = 2):
-        if type(level) is not int or level not in range(len(self._STRENGTH)):
-            raise ValueError("O nível da supressão de ruído precisa estar entre 0 e 3.")
-
         self.sample_rate = int(round(sample_rate))
-        self.level = level
+        self.level = 2
+        self.set_level(level)
         self.hop_samples = max(1, int(round(self.sample_rate / 100.0)))
         self.frame_samples = self.hop_samples * 2
         self.fft_size = 1 << (self.frame_samples - 1).bit_length()
@@ -28,6 +26,8 @@ class StreamingNoiseSuppressor:
 
         self._input = np.empty(0, dtype=np.float32)
         self._previous_input = np.zeros(self.hop_samples, dtype=np.float32)
+        self._frame_buf = np.zeros(self.frame_samples, dtype=np.float32)
+        self._windowed_frame = np.zeros(self.frame_samples, dtype=np.float32)
         self._overlap = np.zeros(self.hop_samples, dtype=np.float32)
         # Buffer de saída para manter callbacks contínuos durante o look-ahead.
         self._output = np.zeros(self.frame_samples, dtype=np.float32)
@@ -39,11 +39,19 @@ class StreamingNoiseSuppressor:
         self._history_index = 0
         self._noise_power = np.zeros(bins, dtype=np.float32)
         self._gain = np.ones(bins, dtype=np.float32)
+        self._padded_gain = np.ones(bins + 2, dtype=np.float32)
         self._frames_since_profile = 0
+
+    def set_level(self, level: int) -> None:
+        if type(level) is not int or level not in range(len(self._STRENGTH)):
+            raise ValueError("O nível da supressão de ruído precisa estar entre 0 e 3.")
+        self.level = level
 
     def reset(self) -> None:
         self._input = np.empty(0, dtype=np.float32)
         self._previous_input.fill(0)
+        self._frame_buf.fill(0)
+        self._windowed_frame.fill(0)
         self._overlap.fill(0)
         self._output = np.zeros(self.frame_samples, dtype=np.float32)
         self._first_frame = True
@@ -52,6 +60,7 @@ class StreamingNoiseSuppressor:
         self._history_index = 0
         self._noise_power.fill(0)
         self._gain.fill(1)
+        self._padded_gain.fill(1)
         self._frames_since_profile = 0
 
     def _update_noise_profile(self, power: np.ndarray, frame_rms: float) -> bool:
@@ -74,27 +83,32 @@ class StreamingNoiseSuppressor:
         return self._history_count >= 20
 
     def _process_frame(self, block: np.ndarray) -> np.ndarray:
-        frame = np.concatenate((self._previous_input, block))
-        self._previous_input = block.copy()
+        self._frame_buf[:self.hop_samples] = self._previous_input
+        self._frame_buf[self.hop_samples:] = block
+        self._previous_input[:] = block
 
-        spectrum = np.fft.rfft(frame * self.window, n=self.fft_size)
+        np.multiply(self._frame_buf, self.window, out=self._windowed_frame)
+        spectrum = np.fft.rfft(self._windowed_frame, n=self.fft_size)
         power = (spectrum.real * spectrum.real + spectrum.imag * spectrum.imag).astype(np.float32)
-        frame_rms = float(np.sqrt(np.mean(frame * frame) + 1e-12))
+        frame_rms = float(np.sqrt(np.mean(self._frame_buf * self._frame_buf) + 1e-12))
         profile_ready = self._update_noise_profile(power, frame_rms)
 
         if profile_ready:
             oversubtraction, minimum_gain = self._STRENGTH[self.level]
+            min_gain_sq = minimum_gain * minimum_gain
             gain_squared = np.maximum(
                 power - oversubtraction * self._noise_power,
-                minimum_gain * minimum_gain * power,
+                min_gain_sq * power,
             ) / (power + 1e-12)
-            target_gain = np.sqrt(np.clip(gain_squared, minimum_gain * minimum_gain, 1.0))
+            target_gain = np.sqrt(np.clip(gain_squared, min_gain_sq, 1.0))
 
-            padded = np.pad(target_gain, (1, 1), mode="edge")
+            self._padded_gain[1:-1] = target_gain
+            self._padded_gain[0] = target_gain[0]
+            self._padded_gain[-1] = target_gain[-1]
             target_gain = (
-                padded[:-2] * 0.2
-                + padded[1:-1] * 0.6
-                + padded[2:] * 0.2
+                self._padded_gain[:-2] * 0.2
+                + self._padded_gain[1:-1] * 0.6
+                + self._padded_gain[2:] * 0.2
             )
             smoothing = np.where(target_gain > self._gain, 0.72, 0.32)
             self._gain += smoothing * (target_gain - self._gain)
@@ -105,31 +119,35 @@ class StreamingNoiseSuppressor:
         filtered = (filtered * self.window).astype(np.float32)
 
         output = self._overlap + filtered[:self.hop_samples]
-        self._overlap = filtered[self.hop_samples:].copy()
+        self._overlap[:] = filtered[self.hop_samples:]
         return output
 
     def process(self, samples: np.ndarray) -> np.ndarray:
         source = np.asarray(samples, dtype=np.float32).reshape(-1)
-        if not len(source):
+        count = len(source)
+        if not count:
             return source.copy()
 
-        self._input = np.concatenate((self._input, source))
+        buf = np.concatenate((self._input, source)) if len(self._input) else source
+        pos = 0
+        end = len(buf)
         produced = []
-        while len(self._input) >= self.hop_samples:
-            block = self._input[:self.hop_samples]
-            self._input = self._input[self.hop_samples:]
+        while end - pos >= self.hop_samples:
+            block = buf[pos:pos + self.hop_samples]
+            pos += self.hop_samples
             frame_output = self._process_frame(block)
             if self._first_frame:
                 # Esse quadro só contém o pré-roll silencioso anterior à entrada.
                 self._first_frame = False
             else:
                 produced.append(frame_output)
+        self._input = buf[pos:].copy() if pos < end else np.empty(0, dtype=np.float32)
+
         if produced:
             self._output = np.concatenate((self._output, *produced))
 
-        count = len(source)
         if len(self._output) < count:
             self._output = np.pad(self._output, (0, count - len(self._output)))
         output = self._output[:count].copy()
-        self._output = self._output[count:]
+        self._output = self._output[count:].copy() if len(self._output) > count else np.empty(0, dtype=np.float32)
         return output

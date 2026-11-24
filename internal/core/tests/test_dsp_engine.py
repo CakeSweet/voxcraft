@@ -95,15 +95,29 @@ class StreamingNoiseSuppressorTests(unittest.TestCase):
 class NoiseSuppressionParameterTests(unittest.TestCase):
     def test_changing_level_selects_python_suppressor_strength(self):
         engine = dsp_engine.RealTimeDSPEngine(48_000)
+        suppressor = engine._noise_suppressor
+        rng = np.random.default_rng(7)
+        quiet = rng.normal(0.0, 0.002, 48_000 // 2).astype(np.float32)
+        engine.process(quiet)
+        history_before = engine._noise_suppressor._history_count
+        self.assertGreater(history_before, 0)
+
         params = engine.params.copy()
         params.noise_suppression_level = 3
         engine.update_params(params)
 
+        self.assertIs(engine._noise_suppressor, suppressor)
         self.assertEqual(engine._noise_suppressor.level, 3)
+        self.assertEqual(engine._noise_suppressor._history_count, history_before)
 
     def test_rejects_unsupported_suppression_level(self):
         with self.assertRaises(ValueError):
             dsp_engine.DSPParams(noise_suppression_level=4)
+        suppressor = dsp_engine.StreamingNoiseSuppressor(48_000, level=1)
+        for bad_level in (-1, 4, 1.5, True):
+            with self.assertRaises(ValueError):
+                suppressor.set_level(bad_level)
+        self.assertEqual(suppressor.level, 1)
 
     def test_parameter_is_global_and_not_saved_in_presets(self):
         from internal.core.src.presets import preset_effect_params
