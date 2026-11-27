@@ -195,7 +195,6 @@
                         <label class="dialog-field">
                             <span data-i18n="theme_label">Tema</span>
                             <select id="theme-select" class="select-input">
-                                <option value="dark" data-i18n="theme_dark">Escuro (Dark)</option>
                                 <option value="oled" data-i18n="theme_oled">Dark Puro (OLED)</option>
                                 <option value="light" data-i18n="theme_light">Claro (Light)</option>
                             </select>
@@ -245,7 +244,8 @@
                                 <span class="slider-title" data-i18n="ptt_release_delay">Perdurar eco (PTT)</span>
                                 <output id="hotkey-delay-value" class="slider-value">0 ms</output>
                             </span>
-                            <input id="hotkey-delay" type="range" min="0" max="5000" step="50" value="0" />
+                            <input id="hotkey-delay" type="range" min="0" max="5000" step="50" value="0"
+                                   data-param="echo_linger_ms" data-default="0" data-factor="1" data-unit="ms" />
                         </label>
                     </section>
 

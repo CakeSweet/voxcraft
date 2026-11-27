@@ -42,7 +42,7 @@ const TEXT = {
         reverb: "Reverb", room_size: "Tamanho da Sala", damping: "Abafamento", effects_chain: "Cadeia de Efeitos",
         reset_effects: "Resetar Efeitos", wave_sine: "Senoide", wave_tri: "Triangular", wave_sq: "Quadrada",
         wave_saw: "Dente de Serra", wave_chord: "Acorde", wave_whisper: "Sussurro (Ruído)",
-        settings_title: "Configurações", appearance_section: "Aparência", theme_label: "Tema", theme_dark: "Escuro (Dark)",
+        settings_title: "Configurações", appearance_section: "Aparência", theme_label: "Tema",
         theme_oled: "Dark Puro (OLED)", theme_light: "Claro (Light)", language_label: "Idioma", close: "Fechar",
         system_section: "Sistema", startup_label: "Iniciar com o sistema",
         startup_label_windows: "Iniciar com o Windows",
@@ -101,7 +101,7 @@ const TEXT = {
         reverb: "Reverb", room_size: "Room Size", damping: "Damping", effects_chain: "Effects Chain",
         reset_effects: "Reset Effects", wave_sine: "Sine", wave_tri: "Triangle", wave_sq: "Square",
         wave_saw: "Sawtooth", wave_chord: "Chord", wave_whisper: "Whisper (Noise)",
-        settings_title: "Settings", appearance_section: "Appearance", theme_label: "Theme", theme_dark: "Dark",
+        settings_title: "Settings", appearance_section: "Appearance", theme_label: "Theme",
         theme_oled: "Pure Dark (OLED)", theme_light: "Light", language_label: "Language", close: "Close",
         system_section: "System", startup_label: "Start with system",
         startup_label_windows: "Start with Windows",
@@ -160,7 +160,7 @@ const TEXT = {
         reverb: "Reverb", room_size: "Tamaño de Sala", damping: "Amortiguación", effects_chain: "Cadena de Efectos",
         reset_effects: "Reiniciar Efectos", wave_sine: "Senoidal", wave_tri: "Triangular", wave_sq: "Cuadrada",
         wave_saw: "Diente de Sierra", wave_chord: "Acorde", wave_whisper: "Susurro (Ruido)",
-        settings_title: "Configuración", appearance_section: "Apariencia", theme_label: "Tema", theme_dark: "Oscuro (Dark)",
+        settings_title: "Configuración", appearance_section: "Apariencia", theme_label: "Tema",
         theme_oled: "Dark Puro (OLED)", theme_light: "Claro (Light)", language_label: "Idioma", close: "Cerrar",
         system_section: "Sistema", startup_label: "Iniciar con el sistema",
         startup_label_windows: "Iniciar con Windows",
@@ -200,7 +200,7 @@ const PARAMS_DEFAULT = {
     tremolo_enabled: false, tremolo_freq_hz: 6, tremolo_waveform: "Senoide", tremolo_depth: 0.65,
     ring_enabled: false, ring_freq_hz: 60, ring_waveform: "Senoide", ring_mix: 0.7,
     dist_enabled: false, dist_drive: 3, dist_bits: 16, dist_downsample: 1, dist_mix: 0.7,
-    echo_enabled: false, echo_delay_ms: 220, echo_feedback: 0.35, echo_mix: 0.35,
+    echo_enabled: false, echo_delay_ms: 220, echo_feedback: 0.35, echo_mix: 0.35, echo_linger_ms: 0,
     reverb_enabled: false, reverb_room: 0.6, reverb_damp: 0.45, reverb_mix: 0.3,
 };
 
@@ -356,7 +356,7 @@ const MIXER_MODULES = [
 ];
 
 let language = localStorage.getItem("voxcraft-language") || "pt";
-let theme = localStorage.getItem("voxcraft-theme") || "dark";
+let theme = localStorage.getItem("voxcraft-theme") || "oled";
 let params = { ...PARAMS_DEFAULT };
 let coreConnected = false;
 let audioRunning = false;
@@ -389,7 +389,6 @@ function clampPttDelayMs(value) {
 
 let captureHotkey = false;
 let hotkey = localStorage.getItem("voxcraft-hotkey") || "F9";
-let hotkeyReleaseDelayMs = clampPttDelayMs(localStorage.getItem("voxcraft-hotkey-delay") ?? 0);
 const HOTKEY_MODIFIER_ORDER = ["CTRL", "ALT", "SHIFT", "SUPER"];
 let hotkeyDown = false;
 let holdBaseBypass = null;
@@ -640,7 +639,7 @@ function readThemeCanvasColors() {
 }
 
 function applyTheme(nextTheme) {
-    theme = ["dark", "oled", "light"].includes(nextTheme) ? nextTheme : "dark";
+    theme = ["oled", "light"].includes(nextTheme) ? nextTheme : "oled";
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("voxcraft-theme", theme);
     document.querySelector("#theme-select").value = theme;
@@ -837,20 +836,20 @@ function createSelect(control) {
     return wrapper;
 }
 
-function setHotkeyReleaseDelayMs(value) {
-    hotkeyReleaseDelayMs = clampPttDelayMs(value);
-    localStorage.setItem("voxcraft-hotkey-delay", String(hotkeyReleaseDelayMs));
-    const settingsInput = document.querySelector("#hotkey-delay");
-    const settingsOutput = document.querySelector("#hotkey-delay-value");
-    if (settingsInput) settingsInput.value = String(hotkeyReleaseDelayMs);
-    if (settingsOutput) settingsOutput.textContent = `${hotkeyReleaseDelayMs} ms`;
-    const echoInput = document.querySelector("#echo-linger-delay");
-    const echoOutput = document.querySelector("#echo-linger-delay-value");
-    if (echoInput) echoInput.value = String(hotkeyReleaseDelayMs);
-    if (echoOutput) echoOutput.textContent = `${hotkeyReleaseDelayMs} ms`;
+function setEchoLingerDelayMs(value) {
+    const clamped = clampPttDelayMs(value);
+    document.querySelectorAll('input[type="range"][data-param="echo_linger_ms"]').forEach((control) => {
+        control.value = String(clamped);
+        updateSliderValue(control);
+    });
+    if (clamped === 0 && !hotkeyDown && hotkeyReleaseTimer !== null) {
+        releaseHeldHotkey(true);
+    }
+    scheduleParameterUpdate("echo_linger_ms", clamped);
 }
 
 function createEchoLingerControl() {
+    const initialValue = clampPttDelayMs(params.echo_linger_ms);
     const wrapper = document.createElement("label");
     wrapper.className = "slider-card";
 
@@ -865,7 +864,7 @@ function createEchoLingerControl() {
     const value = document.createElement("output");
     value.id = "echo-linger-delay-value";
     value.className = "slider-value";
-    value.textContent = `${hotkeyReleaseDelayMs} ms`;
+    value.textContent = `${initialValue} ms`;
     head.append(title, value);
 
     const input = document.createElement("input");
@@ -874,10 +873,14 @@ function createEchoLingerControl() {
     input.min = "0";
     input.max = "5000";
     input.step = "50";
-    input.value = String(hotkeyReleaseDelayMs);
+    input.value = String(initialValue);
+    input.dataset.param = "echo_linger_ms";
+    input.dataset.default = "0";
+    input.dataset.factor = "1";
+    input.dataset.unit = "ms";
     input.setAttribute("aria-label", t("ptt_release_delay"));
     input.addEventListener("input", () => {
-        setHotkeyReleaseDelayMs(input.value);
+        setEchoLingerDelayMs(input.value);
     });
 
     wrapper.append(head, input);
@@ -1557,8 +1560,9 @@ function releaseHeldHotkey(immediate = false) {
         holdBaseBypass = null;
         if (base !== null) setBypass(base);
     };
+    const lingerDelayMs = clampPttDelayMs(params.echo_linger_ms);
     const shouldDelayEcho = !immediate
-        && hotkeyReleaseDelayMs > 0
+        && lingerDelayMs > 0
         && Boolean(document.querySelector("#hotkey-hold")?.checked)
         && holdBaseBypass === true
         && Boolean(params.echo_enabled);
@@ -1569,7 +1573,7 @@ function releaseHeldHotkey(immediate = false) {
     }
     if (!wasDown && hotkeyReleaseTimer !== null) return;
     cancelBypassRelease();
-    hotkeyReleaseTimer = window.setTimeout(applyRestore, hotkeyReleaseDelayMs);
+    hotkeyReleaseTimer = window.setTimeout(applyRestore, lingerDelayMs);
 }
 
 function pressHotkey() {
@@ -1708,7 +1712,7 @@ function setupHotkey() {
 
     hotkeyEnabledControl.checked = localStorage.getItem("voxcraft-hotkey-enabled") !== "false";
     hotkeyHoldControl.checked = localStorage.getItem("voxcraft-hotkey-hold") === "true";
-    setHotkeyReleaseDelayMs(hotkeyReleaseDelayMs);
+    localStorage.removeItem("voxcraft-hotkey-delay");
     hotkeyDelayControl.setAttribute("aria-label", t("ptt_release_delay"));
 
     const syncHotkeyHoldControl = () => {
@@ -1733,7 +1737,7 @@ function setupHotkey() {
         syncHotkeyHoldControl();
     });
     hotkeyDelayControl.addEventListener("input", () => {
-        setHotkeyReleaseDelayMs(hotkeyDelayControl.value);
+        setEchoLingerDelayMs(hotkeyDelayControl.value);
     });
 
     window.addEventListener("keydown", (event) => {
@@ -2030,6 +2034,8 @@ async function connectCore() {
             if (key === "noise_suppression_level") {
                 const rounded = Math.round(value);
                 value = Math.max(0, Math.min(3, rounded));
+            } else if (key === "echo_linger_ms") {
+                value = clampPttDelayMs(value);
             }
             return [[key, value]];
         }));

@@ -55,29 +55,6 @@
 }
 
 :root,
-html[data-theme="dark"] {
-    --bg: #0b101b;
-    --panel: #111827;
-    --card: #161f30;
-    --subcard: #1b263b;
-    --canvas: #0b101b;
-    --border: #233044;
-    --border-soft: #1c2738;
-    --control: #1e293b;
-    --control-hover: #2c3b52;
-    --text: #e2e8f0;
-    --text-body: #cbd5e1;
-    --text-muted: #94a3b8;
-    --text-subtle: #64748b;
-    --accent: #38bdf8;
-    --accent-deep: #0284c7;
-    --accent-text: #06131f;
-    --live: #10b981;
-    --warn: #f59e0b;
-    --grid-zero: #334155;
-    --grid-line: #162032;
-}
-
 html[data-theme="oled"] {
     --bg: #030508;
     --panel: #090c12;

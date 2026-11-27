@@ -178,7 +178,7 @@
 
   const state = {
     lang: "pt",
-    theme: "dark",
+    theme: "oled",
     platform: "windows",
     version: DEFAULT_VERSION,
     tag: `v${DEFAULT_VERSION}`,
@@ -188,7 +188,7 @@
   try {
     const savedTheme = localStorage.getItem("voxcraft_pages_theme");
     const savedLang = localStorage.getItem("voxcraft_pages_lang");
-    if (savedTheme && ["dark", "oled", "light"].includes(savedTheme)) state.theme = savedTheme;
+    if (savedTheme && ["oled", "light"].includes(savedTheme)) state.theme = savedTheme;
     if (savedLang && ["pt", "en", "es"].includes(savedLang)) state.lang = savedLang;
   } catch {
     // Ignora caso storage esteja restrito
@@ -204,15 +204,16 @@
   let copyTimer = null;
 
   function applyTheme(theme) {
-    state.theme = theme;
-    document.documentElement.setAttribute("data-theme", theme);
+    const resolvedTheme = ["oled", "light"].includes(theme) ? theme : "oled";
+    state.theme = resolvedTheme;
+    document.documentElement.setAttribute("data-theme", resolvedTheme);
     $$("[data-theme-choice]").forEach((btn) => {
-      const active = btn.dataset.themeChoice === theme;
+      const active = btn.dataset.themeChoice === resolvedTheme;
       btn.classList.toggle("active", active);
       btn.setAttribute("aria-pressed", active ? "true" : "false");
     });
     try {
-      localStorage.setItem("voxcraft_pages_theme", theme);
+      localStorage.setItem("voxcraft_pages_theme", resolvedTheme);
     } catch {}
   }
 

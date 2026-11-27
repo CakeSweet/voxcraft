@@ -1,4 +1,5 @@
 from dataclasses import dataclass, asdict
+import math
 import threading
 import numpy as np
 from scipy import signal
@@ -96,6 +97,7 @@ class DSPParams:
     echo_delay_ms: float = 220.0   # 10 a 700 ms
     echo_feedback: float = 0.35    # 0.0 a 0.85
     echo_mix: float = 0.35
+    echo_linger_ms: float = 0.0    # 0 a 5000 ms (tempo extra do PTT com eco ativo)
 
     # Reverb (Espaço / Sala)
     reverb_enabled: bool = False
@@ -109,6 +111,14 @@ class DSPParams:
             or self.noise_suppression_level not in range(4)
         ):
             raise ValueError("O nível da supressão de ruído precisa estar entre 0 e 3.")
+        if (
+            isinstance(self.echo_linger_ms, bool)
+            or not isinstance(self.echo_linger_ms, (int, float))
+            or not math.isfinite(self.echo_linger_ms)
+            or not (0.0 <= float(self.echo_linger_ms) <= 5000.0)
+        ):
+            raise ValueError("O tempo para perdurar o eco (PTT) precisa estar entre 0 e 5000 ms.")
+        self.echo_linger_ms = float(self.echo_linger_ms)
 
     def copy(self) -> "DSPParams":
         return DSPParams(**asdict(self))

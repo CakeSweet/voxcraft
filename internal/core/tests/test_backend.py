@@ -1,9 +1,11 @@
 import io
 import json
+import os
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from internal.core.src import backend
+from internal.core.src import backend, presets
 
 
 class StdioServerTests(unittest.TestCase):
@@ -84,9 +86,38 @@ class ParameterValidationTests(unittest.TestCase):
             {"noise_suppression_level": 2.0},
             {"bypass": 1},
             {"vocoder_carrier": 123},
+            {"echo_linger_ms": -50},
+            {"echo_linger_ms": 5050},
+            {"echo_linger_ms": float("nan")},
+            {"echo_linger_ms": True},
         ):
             with self.assertRaises(ValueError):
                 core._set_params(bad_payload)
-        result = core._set_params({"input_gain_db": 3, "bypass": True})
+        result = core._set_params({"input_gain_db": 3, "bypass": True, "echo_linger_ms": 1500})
         self.assertEqual(result["input_gain_db"], 3.0)
         self.assertIs(result["bypass"], True)
+        self.assertEqual(result["echo_linger_ms"], 1500.0)
+
+
+class PresetEchoLingerTests(unittest.TestCase):
+    def test_echo_linger_ms_is_saved_and_restored_per_preset(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            presets_file = os.path.join(tmpdir, "user_presets.json")
+            with patch.object(presets, "USER_PRESETS_FILE", presets_file):
+                core = backend.VoxCraftCore()
+                core._set_params({"echo_enabled": True, "echo_linger_ms": 1500})
+                core._save_preset("Eco Longo")
+
+                core._set_params({"echo_enabled": True, "echo_linger_ms": 250})
+                core._save_preset("Eco Curto")
+
+                reloaded = backend.VoxCraftCore()
+                first = reloaded._apply_preset("Eco Longo", custom=True)
+                self.assertEqual(first["echo_linger_ms"], 1500.0)
+
+                second = reloaded._apply_preset("Eco Curto", custom=True)
+                self.assertEqual(second["echo_linger_ms"], 250.0)
+
+                normal = reloaded._apply_preset("Normal", custom=False)
+                self.assertEqual(normal["echo_linger_ms"], 0.0)
+
