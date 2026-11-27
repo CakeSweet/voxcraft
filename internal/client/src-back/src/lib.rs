@@ -554,7 +554,7 @@ async fn set_wayland_global_shortcut(
     use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
 
     const SHORTCUT_ID: &str = "com.cakesweet.voxcraft.toggle_bypass";
-    let trigger = portal_preferred_trigger(&shortcut)
+    let preferred_trigger = portal_preferred_trigger(&shortcut)
         .ok_or_else(|| "combinação não suportada pelo portal de atalhos".to_string())?;
     let portal = GlobalShortcuts::new()
         .await
@@ -576,14 +576,14 @@ async fn set_wayland_global_shortcut(
         .await
         .map_err(|error| format!("não foi possível ouvir mudanças de atalho do portal: {error}"))?;
 
-    let definition = NewShortcut::new(
+    let definitions = [NewShortcut::new(
         SHORTCUT_ID,
         "Atalho do VoxCraft Studio para alternar a voz original",
     )
-    .preferred_trigger(trigger.as_str());
+    .preferred_trigger(preferred_trigger.as_str())];
     let binding = async {
         let request = portal
-            .bind_shortcuts(&session, &[definition], None, Default::default())
+            .bind_shortcuts(&session, &definitions, None, Default::default())
             .await
             .map_err(|error| format!("não foi possível solicitar o atalho ao portal: {error}"))?;
         let response = request
@@ -637,8 +637,13 @@ async fn set_wayland_global_shortcut(
                 },
                 event = shortcuts_changed.next() => match event {
                     Some(event) => {
-                        if let Some(bound) = event.shortcuts().iter().find(|bound| bound.id() == SHORTCUT_ID) {
-                            let _ = event_app.emit(
+                        if let Some(bound) = event
+                            .shortcuts()
+                            .iter()
+                            .find(|bound| bound.id() == SHORTCUT_ID)
+                        {
+                            let _ = event_app.emit_to(
+                                "main",
                                 "voxcraft-global-hotkey",
                                 json!({ "description": bound.trigger_description() }),
                             );

@@ -819,6 +819,18 @@ select {
     color: var(--accent);
 }
 
+.hotkey-delay-card {
+    margin-top: 6px;
+}
+
+.hotkey-delay-card:has(> input:disabled) {
+    opacity: 0.55;
+}
+
+.hotkey-delay-card > input:disabled {
+    cursor: not-allowed;
+}
+
 .meter-row {
     display: grid;
     grid-template-columns: 48px minmax(50px, 1fr) 42px;

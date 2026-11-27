@@ -415,6 +415,7 @@ class RealTimeDSPEngine:
         self._rev_lp_a = np.array([1.0, -0.45], dtype=np.float64)
         self._rev_comb_sum = np.zeros(512, dtype=np.float32)
         self._was_bypass = bool(self.params.bypass)
+        self._was_echo_enabled = bool(self.params.echo_enabled)
 
     def _clear_effect_buffers_unlocked(self):
         self._noise_suppressor.reset()
@@ -592,7 +593,13 @@ class RealTimeDSPEngine:
 
         # 14. Eco / Delay
         if p.echo_enabled and p.echo_mix > 0.01:
+            if not self._was_echo_enabled:
+                self._echo_ring.clear()
+                self._echo_lp_zi.fill(0.0)
+                self._was_echo_enabled = True
             x = self._process_echo(x, p.echo_delay_ms, p.echo_feedback, p.echo_mix)
+        else:
+            self._was_echo_enabled = False
 
         # 15. Reverb
         if p.reverb_enabled and p.reverb_mix > 0.01:

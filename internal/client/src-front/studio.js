@@ -17,7 +17,8 @@ const TEXT = {
         loading_devices: "Listando dispositivos…", stopped: "Parado", hotkey_section: "Atalho", enable_hotkey: "Ativar atalho",
         define_key: "Definir atalho",
         hotkey_local_only: "Atalho global indisponível. Funciona apenas com a janela focada.",
-        hold_key: "Segurar tecla", levels_section: "Níveis", input_lbl: "Entrada", output_lbl: "Saída",
+        hold_key: "Segurar tecla", ptt_release_delay: "Perdurar eco (PTT)",
+        levels_section: "Níveis", input_lbl: "Entrada", output_lbl: "Saída",
         dynamics_section: "Dinâmica & Ganho", input_gain: "Ganho de Entrada",
         noise_suppression_level: "Intensidade da Supressão",
         suppression_level_0: "Leve", suppression_level_1: "Moderada",
@@ -75,7 +76,8 @@ const TEXT = {
         loading_devices: "Listing devices…", stopped: "Stopped", hotkey_section: "Hotkey", enable_hotkey: "Enable hotkey",
         define_key: "Set shortcut",
         hotkey_local_only: "Global shortcut unavailable. It only works while the window is focused.",
-        hold_key: "Hold key", levels_section: "Levels", input_lbl: "Input", output_lbl: "Output",
+        hold_key: "Hold key", ptt_release_delay: "Echo linger (PTT)",
+        levels_section: "Levels", input_lbl: "Input", output_lbl: "Output",
         dynamics_section: "Dynamics & Gain", input_gain: "Input Gain",
         noise_suppression_level: "Suppression strength",
         suppression_level_0: "Light", suppression_level_1: "Moderate",
@@ -133,7 +135,8 @@ const TEXT = {
         loading_devices: "Listando dispositivos…", stopped: "Detenido", hotkey_section: "Atajo", enable_hotkey: "Activar atajo",
         define_key: "Asignar atajo",
         hotkey_local_only: "Atajo global no disponible. Solo funciona con la ventana enfocada.",
-        hold_key: "Mantener tecla", levels_section: "Niveles", input_lbl: "Entrada", output_lbl: "Salida",
+        hold_key: "Mantener tecla", ptt_release_delay: "Eco al soltar (PTT)",
+        levels_section: "Niveles", input_lbl: "Entrada", output_lbl: "Salida",
         dynamics_section: "Dinámica y Ganancia", input_gain: "Ganancia de Entrada",
         noise_suppression_level: "Intensidad de supresión",
         suppression_level_0: "Leve", suppression_level_1: "Moderada",
@@ -316,7 +319,7 @@ const GROUPS = {
     ],
     space: [
         {
-            title: "echo_delay", toggle: "echo_enabled",
+            title: "echo_delay", toggle: "echo_enabled", echoLingerDelay: true,
             controls: [
                 slider("echo_delay_ms", "delay", 10, 700, 2, "ms"),
                 slider("echo_feedback", "feedback", 0, 85, 1, "%", 0.01),
@@ -377,11 +380,20 @@ let waveformDirty = true;
 let lastWaveformWasFlat = false;
 let meterElements = null;
 const lastMeterDisplay = { inputWidth: "", outputWidth: "", inputText: "", outputText: "" };
+function clampPttDelayMs(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    const snapped = Math.round(numeric / 50) * 50;
+    return Math.max(0, Math.min(5000, snapped));
+}
+
 let captureHotkey = false;
 let hotkey = localStorage.getItem("voxcraft-hotkey") || "F9";
+let hotkeyReleaseDelayMs = clampPttDelayMs(localStorage.getItem("voxcraft-hotkey-delay") ?? 0);
 const HOTKEY_MODIFIER_ORDER = ["CTRL", "ALT", "SHIFT", "SUPER"];
 let hotkeyDown = false;
 let holdBaseBypass = null;
+let hotkeyReleaseTimer = null;
 let registeredHotkey = null;
 let listenForGlobalHotkey = null;
 let waylandHotkeys = null;
@@ -607,6 +619,10 @@ function applyLanguage(nextLanguage) {
     });
     document.querySelector("#language-select").value = language;
     document.querySelector("#hotkey-key").setAttribute("aria-description", t("define_key"));
+    const hotkeyDelay = document.querySelector("#hotkey-delay");
+    if (hotkeyDelay) hotkeyDelay.setAttribute("aria-label", t("ptt_release_delay"));
+    const echoLingerDelay = document.querySelector("#echo-linger-delay");
+    if (echoLingerDelay) echoLingerDelay.setAttribute("aria-label", t("ptt_release_delay"));
     renderGlobalHotkeyStatus();
     document.querySelectorAll('input[type="range"][data-param]').forEach(updateSliderValue);
     updateGateRangeDescription(document.querySelector("#gate-threshold-range"));
@@ -740,6 +756,9 @@ function createSwitch(param, labelKey, options = {}) {
     input.dataset.default = String(PARAMS_DEFAULT[param] ?? false);
     input.setAttribute("aria-label", t(labelKey));
     input.addEventListener("change", () => {
+        if (param === "echo_enabled" && !input.checked && !hotkeyDown && hotkeyReleaseTimer !== null) {
+            releaseHeldHotkey(true);
+        }
         scheduleParameterUpdate(param, input.checked);
         if (param.startsWith("eq_")) drawEqCurve();
     });
@@ -818,6 +837,53 @@ function createSelect(control) {
     return wrapper;
 }
 
+function setHotkeyReleaseDelayMs(value) {
+    hotkeyReleaseDelayMs = clampPttDelayMs(value);
+    localStorage.setItem("voxcraft-hotkey-delay", String(hotkeyReleaseDelayMs));
+    const settingsInput = document.querySelector("#hotkey-delay");
+    const settingsOutput = document.querySelector("#hotkey-delay-value");
+    if (settingsInput) settingsInput.value = String(hotkeyReleaseDelayMs);
+    if (settingsOutput) settingsOutput.textContent = `${hotkeyReleaseDelayMs} ms`;
+    const echoInput = document.querySelector("#echo-linger-delay");
+    const echoOutput = document.querySelector("#echo-linger-delay-value");
+    if (echoInput) echoInput.value = String(hotkeyReleaseDelayMs);
+    if (echoOutput) echoOutput.textContent = `${hotkeyReleaseDelayMs} ms`;
+}
+
+function createEchoLingerControl() {
+    const wrapper = document.createElement("label");
+    wrapper.className = "slider-card";
+
+    const head = document.createElement("span");
+    head.className = "slider-head";
+
+    const title = document.createElement("span");
+    title.className = "slider-title";
+    title.dataset.labelKey = "ptt_release_delay";
+    title.textContent = t("ptt_release_delay");
+
+    const value = document.createElement("output");
+    value.id = "echo-linger-delay-value";
+    value.className = "slider-value";
+    value.textContent = `${hotkeyReleaseDelayMs} ms`;
+    head.append(title, value);
+
+    const input = document.createElement("input");
+    input.id = "echo-linger-delay";
+    input.type = "range";
+    input.min = "0";
+    input.max = "5000";
+    input.step = "50";
+    input.value = String(hotkeyReleaseDelayMs);
+    input.setAttribute("aria-label", t("ptt_release_delay"));
+    input.addEventListener("input", () => {
+        setHotkeyReleaseDelayMs(input.value);
+    });
+
+    wrapper.append(head, input);
+    return wrapper;
+}
+
 function renderEffectCard(definition) {
     const card = document.createElement("section");
     card.className = "card effect-card";
@@ -839,6 +905,9 @@ function renderEffectCard(definition) {
     definition.controls.forEach((control) => {
         controls.append(control.kind === "select" ? createSelect(control) : createSlider(control));
     });
+    if (definition.echoLingerDelay) {
+        controls.append(createEchoLingerControl());
+    }
     card.append(header, controls);
 
     if (definition.quick) {
@@ -1340,6 +1409,9 @@ async function applyPreset(value) {
     const custom = value.startsWith("★ ");
     const name = custom ? value.slice(2) : value;
     if (!name) return;
+    cancelBypassRelease();
+    hotkeyDown = false;
+    holdBaseBypass = null;
     window.clearTimeout(paramTimer);
     try {
         await flushParameterUpdates();
@@ -1385,6 +1457,9 @@ async function deletePreset() {
         acceptLabel: t("delete"), danger: true,
     }))) return;
     try {
+        cancelBypassRelease();
+        hotkeyDown = false;
+        holdBaseBypass = null;
         window.clearTimeout(paramTimer);
         await flushParameterUpdates();
         await coreRequest("delete_preset", { name });
@@ -1456,16 +1531,45 @@ function ensureAudioRunning(restart = false) {
     return enqueueAudioOperation(() => startAudio(restart));
 }
 
+function cancelBypassRelease() {
+    if (hotkeyReleaseTimer !== null) {
+        window.clearTimeout(hotkeyReleaseTimer);
+        hotkeyReleaseTimer = null;
+    }
+}
+
 function setBypass(enabled) {
     params.bypass = Boolean(enabled);
     updateBypassButton();
     scheduleParameterUpdate("bypass", params.bypass, true);
 }
 
-function releaseHeldHotkey() {
-    if (hotkeyDown && holdBaseBypass !== null) setBypass(holdBaseBypass);
+function releaseHeldHotkey(immediate = false) {
+    const wasDown = hotkeyDown;
     hotkeyDown = false;
-    holdBaseBypass = null;
+    if (holdBaseBypass === null) {
+        cancelBypassRelease();
+        return;
+    }
+    const applyRestore = () => {
+        hotkeyReleaseTimer = null;
+        const base = holdBaseBypass;
+        holdBaseBypass = null;
+        if (base !== null) setBypass(base);
+    };
+    const shouldDelayEcho = !immediate
+        && hotkeyReleaseDelayMs > 0
+        && Boolean(document.querySelector("#hotkey-hold")?.checked)
+        && holdBaseBypass === true
+        && Boolean(params.echo_enabled);
+    if (!shouldDelayEcho) {
+        cancelBypassRelease();
+        applyRestore();
+        return;
+    }
+    if (!wasDown && hotkeyReleaseTimer !== null) return;
+    cancelBypassRelease();
+    hotkeyReleaseTimer = window.setTimeout(applyRestore, hotkeyReleaseDelayMs);
 }
 
 function pressHotkey() {
@@ -1473,9 +1577,18 @@ function pressHotkey() {
     if (hotkeyDown) return;
     hotkeyDown = true;
     if (document.querySelector("#hotkey-hold").checked) {
-        holdBaseBypass = Boolean(params.bypass);
-        setBypass(!holdBaseBypass);
+        if (hotkeyReleaseTimer !== null) {
+            cancelBypassRelease();
+            if (holdBaseBypass !== null && Boolean(params.bypass) === holdBaseBypass) {
+                setBypass(!holdBaseBypass);
+            }
+        } else {
+            holdBaseBypass = Boolean(params.bypass);
+            setBypass(!holdBaseBypass);
+        }
     } else {
+        cancelBypassRelease();
+        holdBaseBypass = null;
         setBypass(!params.bypass);
     }
     playHotkeyFeedback();
@@ -1501,7 +1614,7 @@ function handleGlobalHotkey(state) {
     if (state === "Pressed" && registeredHotkey === hotkey) pressHotkey();
     if (state === "Released") releaseHeldHotkey();
     if (state === "Unavailable") {
-        releaseHeldHotkey();
+        releaseHeldHotkey(true);
         registeredHotkey = null;
         portalHotkeyDescription = "";
         hotkeyGlobalError = "XDG GlobalShortcuts session closed";
@@ -1542,7 +1655,7 @@ function configureGlobalHotkey() {
                     }
                 }
             }
-            releaseHeldHotkey();
+            releaseHeldHotkey(true);
             registeredHotkey = desiredHotkey;
             hotkeyGlobalError = "";
         } catch (error) {
@@ -1558,6 +1671,10 @@ function configureGlobalHotkey() {
 function setupHotkey() {
     playHotkeyFeedback = setupHotkeyFeedback();
     const keyButton = document.querySelector("#hotkey-key");
+    const hotkeyEnabledControl = document.querySelector("#hotkey-enabled");
+    const hotkeyHoldControl = document.querySelector("#hotkey-hold");
+    const hotkeyDelayControl = document.querySelector("#hotkey-delay");
+
     hotkey = normalizeHotkey(hotkey);
     localStorage.setItem("voxcraft-hotkey", hotkey);
     const finishCapture = () => {
@@ -1582,37 +1699,41 @@ function setupHotkey() {
             return;
         }
         captureHotkey = true;
-        releaseHeldHotkey();
+        releaseHeldHotkey(true);
         keyButton.textContent = t("key_capture");
         keyButton.classList.add("is-capturing");
         void configureGlobalHotkey();
     });
     document.querySelector("#settings-dialog").addEventListener("close", finishCapture);
 
-    document.querySelector("#hotkey-enabled").checked =
-        localStorage.getItem("voxcraft-hotkey-enabled") !== "false";
-    document.querySelector("#hotkey-hold").checked =
-        localStorage.getItem("voxcraft-hotkey-hold") === "true";
-    const hotkeyEnabledControl = document.querySelector("#hotkey-enabled");
-    const hotkeyHoldControl = document.querySelector("#hotkey-hold");
+    hotkeyEnabledControl.checked = localStorage.getItem("voxcraft-hotkey-enabled") !== "false";
+    hotkeyHoldControl.checked = localStorage.getItem("voxcraft-hotkey-hold") === "true";
+    setHotkeyReleaseDelayMs(hotkeyReleaseDelayMs);
+    hotkeyDelayControl.setAttribute("aria-label", t("ptt_release_delay"));
+
     const syncHotkeyHoldControl = () => {
         hotkeyHoldControl.disabled = !hotkeyEnabledControl.checked;
         if (hotkeyHoldControl.disabled && hotkeyHoldControl.checked) {
             hotkeyHoldControl.checked = false;
             localStorage.setItem("voxcraft-hotkey-hold", "false");
         }
+        hotkeyDelayControl.disabled = !hotkeyEnabledControl.checked || !hotkeyHoldControl.checked;
     };
     syncHotkeyHoldControl();
-    document.querySelector("#hotkey-enabled").addEventListener("change", (event) => {
+    hotkeyEnabledControl.addEventListener("change", (event) => {
         localStorage.setItem("voxcraft-hotkey-enabled", String(event.target.checked));
-        if (!event.target.checked) releaseHeldHotkey();
+        if (!event.target.checked) releaseHeldHotkey(true);
         syncHotkeyHoldControl();
         void configureGlobalHotkey();
     });
-    document.querySelector("#hotkey-hold").addEventListener("change", (event) => {
+    hotkeyHoldControl.addEventListener("change", (event) => {
         if (!hotkeyEnabledControl.checked) return;
         localStorage.setItem("voxcraft-hotkey-hold", String(event.target.checked));
-        releaseHeldHotkey();
+        releaseHeldHotkey(true);
+        syncHotkeyHoldControl();
+    });
+    hotkeyDelayControl.addEventListener("input", () => {
+        setHotkeyReleaseDelayMs(hotkeyDelayControl.value);
     });
 
     window.addEventListener("keydown", (event) => {
@@ -1637,7 +1758,7 @@ function setupHotkey() {
             return;
         }
         if (registeredHotkey === hotkey || event.repeat
-            || !document.querySelector("#hotkey-enabled").checked
+            || !hotkeyEnabledControl.checked
             || !matchesHotkeyEvent(event, hotkey)) return;
         const target = event.target;
         if (target instanceof HTMLElement && ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
@@ -1843,7 +1964,12 @@ function setupEvents() {
     });
     document.querySelector("#save-preset").addEventListener("click", () => void savePreset());
     document.querySelector("#delete-preset").addEventListener("click", () => void deletePreset());
-    document.querySelector("#bypass-button").addEventListener("click", () => setBypass(!params.bypass));
+    document.querySelector("#bypass-button").addEventListener("click", () => {
+        cancelBypassRelease();
+        hotkeyDown = false;
+        holdBaseBypass = null;
+        setBypass(!params.bypass);
+    });
     document.querySelector("#refresh-devices").addEventListener("click", () => void refreshDevices());
     document.querySelector("#configure-virtual-output").addEventListener("click", () => void configureVirtualOutput());
     ["input-device", "latency-select"].forEach((id) => {

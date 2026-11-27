@@ -157,3 +157,23 @@ class NoiseGateTests(unittest.TestCase):
         params = dsp_engine.DSPParams(gate_threshold_db=-52.0)
 
         self.assertNotIn("gate_threshold_db", preset_effect_params(params))
+
+
+class EchoBufferResetTests(unittest.TestCase):
+    def test_re_enabling_echo_clears_stale_ring_buffer(self):
+        engine = dsp_engine.RealTimeDSPEngine(48_000)
+        p = engine.params.copy()
+        p.echo_enabled = True
+        p.echo_delay_ms = 50.0
+        p.echo_mix = 0.8
+        engine.update_params(p)
+        engine.process(np.full(512, 0.25, dtype=np.float32))
+
+        p.echo_enabled = False
+        engine.update_params(p)
+        engine.process(np.zeros(512, dtype=np.float32))
+
+        p.echo_enabled = True
+        engine.update_params(p)
+        out = engine.process(np.zeros(512, dtype=np.float32))
+        self.assertLess(float(np.max(np.abs(out))), 1e-5)
